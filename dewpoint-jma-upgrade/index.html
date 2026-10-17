@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="東京氣象">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.png">
-<title>多城市氣象觀測 | Tokyo Meteo</title>
+<title>即時氣象觀測 | Tokyo Meteo</title>
 <style>
 :root{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;color-scheme:dark}
 *{box-sizing:border-box}
@@ -56,7 +56,24 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .presets{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.presets button{font-size:12px;padding:12px 5px}
 .muted{font-size:11px;color:#aac1d1;line-height:1.8;margin:20px 2px}
 .source-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px}
-.city-picker{margin-bottom:14px}.city-picker label{display:block;font-size:12px;color:#b6d0df;margin-bottom:8px}.city-picker select{width:100%;background:#203a50;color:#f4f8fc;border:1px solid #58758b;border-radius:14px;padding:14px;font:inherit;font-size:16px}.tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
+/* Custom dark city selector, consistent across iOS and Android */
+.city-picker{margin-bottom:14px;position:relative;z-index:10}
+.city-picker .city-label{display:block;font-size:12px;color:#b6d0df;margin-bottom:8px}
+.city-trigger{list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent;width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left;background:#203a50;color:#f4f8fc;border:1px solid #58758b;border-radius:14px;padding:15px 17px;font-size:16px;min-height:55px}
+.city-trigger::-webkit-details-marker{display:none}
+.city-trigger::marker{content:""}
+.city-trigger:focus-visible,.city-option:focus-visible{outline:2px solid #85d8e5;outline-offset:2px}
+.city-picker[open] .city-trigger{border-color:#85d8e5;box-shadow:0 0 0 2px rgba(133,216,229,.15);border-radius:14px 14px 10px 10px}
+.city-chevron{font-size:14px;color:#9fd5e5;transition:transform .18s ease}
+.city-picker[open] .city-trigger .city-chevron{transform:rotate(180deg)}
+.city-menu{position:absolute;top:100%;left:0;right:0;margin-top:6px;background:#192e42;border:1px solid #52758b;border-radius:16px;padding:7px;box-shadow:0 16px 38px rgba(0,0,0,.48);max-height:min(390px,52dvh);overflow-y:auto;overscroll-behavior:contain}
+.city-option{display:flex;width:100%;align-items:center;justify-content:space-between;text-align:left;background:transparent;border:0;border-radius:10px;padding:13px 12px;font-size:15px;color:#e5f0f7;min-height:47px}
+.city-option + .city-option{margin-top:2px}
+.city-option[aria-selected="true"]{background:#2a5367;color:#a9f0e0;font-weight:700}
+.city-option .city-check{color:#8de4cb;font-size:18px}
+.city-option:not([aria-selected="true"]) .city-check{visibility:hidden}
+@media(hover:hover){.city-option:hover{background:#29465b}}
+.tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
 @media(max-width:360px){.big{font-size:55px}.metric-value{font-size:27px}main{padding-left:14px;padding-right:14px}}
 </style>
 </head>
@@ -65,8 +82,21 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 <div class="eyebrow">TOKYO METEO · MULTI-CITY</div>
 <h1 id="pageTitle">即時氣象觀測</h1>
 <div class="subtitle" id="stationSubtitle">日本氣象廳 AMeDAS · 東京觀測站 44132</div>
-<div class="city-picker"><label for="citySelect">選擇城市 / SELECT CITY</label>
-<select id="citySelect"><option value="tokyo">東京 · Tokyo</option><option value="taipei">台北 · Taipei</option><option value="seoul">首爾 · Seoul</option><option value="new-york">紐約 · New York</option><option value="paris">巴黎 · Paris</option><option value="sapporo">札幌 · Sapporo</option><option value="singapore">新加坡 · Singapore</option></select></div>
+<details class="city-picker" id="cityPicker">
+  <span class="city-label" id="cityLabel">選擇城市 / SELECT CITY</span>
+  <summary class="city-trigger" id="cityTrigger" aria-labelledby="cityLabel cityCurrent">
+    <span id="cityCurrent">東京 · Tokyo</span><span class="city-chevron" aria-hidden="true">⌄</span>
+  </summary>
+  <div id="cityMenu" class="city-menu" aria-label="選擇城市">
+    <button type="button" class="city-option" role="option" data-city="tokyo" aria-selected="true">東京 · Tokyo <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="taipei" aria-selected="false">台北 · Taipei <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="seoul" aria-selected="false">首爾 · Seoul <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="new-york" aria-selected="false">紐約 · New York <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="paris" aria-selected="false">巴黎 · Paris <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="sapporo" aria-selected="false">札幌 · Sapporo <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-option" role="option" data-city="singapore" aria-selected="false">新加坡 · Singapore <span class="city-check" aria-hidden="true">✓</span></button>
+  </div>
+</details>
 
 <div class="card hero">
   <div id="status" class="status loading" role="status" aria-live="polite">正在取得觀測資料…</div>
@@ -169,7 +199,7 @@ function cityInfo(){return CITIES[city]}
 function citySource(){return cityInfo().isJMA?'JMA · 東京':'Open-Meteo · 模型'}
 function updateCityLabels(){
  const c=cityInfo(),j=c.isJMA;
- $('pageTitle').textContent=c.name+'氣象觀測';
+ $('pageTitle').textContent='即時氣象觀測';
  $('stationSubtitle').textContent=j?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
  $('sourceTag').textContent=mode==='manual'?'手動模擬':citySource();
  $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
@@ -304,9 +334,26 @@ $('copy').onclick=async()=>{
 $('autoMode').onclick=()=>setMode('auto');
 $('manualMode').onclick=()=>setMode('manual');
 $('refresh').onclick=fetchLatest;
-$('citySelect').onchange=e=>switchCity(e.target.value);
+const cityOptions=[...document.querySelectorAll('.city-option')];
+function syncCityMenu(){
+ const selected=cityOptions.find(b=>b.dataset.city===city);
+ if(selected)$('cityCurrent').textContent=selected.textContent.replace('✓','').trim();
+ cityOptions.forEach(b=>b.setAttribute('aria-selected',String(b.dataset.city===city)));
+}
+// Native <details> controls opening on iPhone without JavaScript.
+// Buttons only handle selection; no focus/pointer handlers interfere with touch.
+cityOptions.forEach(b=>{
+ b.addEventListener('click',()=>{
+   switchCity(b.dataset.city);
+   syncCityMenu();
+   $('cityPicker').open=false;
+ });
+});
+document.addEventListener('keydown',e=>{
+ if(e.key==='Escape'&&$('cityPicker').open){$('cityPicker').open=false;$('cityTrigger').focus()}
+});
 try{const savedCity=localStorage.getItem('meteo-city');if(CITIES[savedCity])city=savedCity}catch(e){}
-$('citySelect').value=city;updateCityLabels();setMode('auto');
+syncCityMenu();updateCityLabels();setMode('auto');
 setInterval(()=>{if(mode==='auto'&&!document.hidden)fetchLatest()},600000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&mode==='auto')fetchLatest()});
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
