@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="東京氣象">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon.png">
-<title>東京氣象觀測 | Tokyo Meteo</title>
+<title>多城市氣象觀測 | Tokyo Meteo</title>
 <style>
 :root{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif;color-scheme:dark}
 *{box-sizing:border-box}
@@ -56,15 +56,17 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .presets{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}.presets button{font-size:12px;padding:12px 5px}
 .muted{font-size:11px;color:#aac1d1;line-height:1.8;margin:20px 2px}
 .source-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px}
-.tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
+.city-picker{margin-bottom:14px}.city-picker label{display:block;font-size:12px;color:#b6d0df;margin-bottom:8px}.city-picker select{width:100%;background:#203a50;color:#f4f8fc;border:1px solid #58758b;border-radius:14px;padding:14px;font:inherit;font-size:16px}.tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
 @media(max-width:360px){.big{font-size:55px}.metric-value{font-size:27px}main{padding-left:14px;padding-right:14px}}
 </style>
 </head>
 <body>
 <main>
-<div class="eyebrow">TOKYO METEO · OBSERVATION</div>
-<h1>東京氣象觀測</h1>
-<div class="subtitle">日本氣象廳 AMeDAS · 東京觀測站 44132</div>
+<div class="eyebrow">TOKYO METEO · MULTI-CITY</div>
+<h1 id="pageTitle">即時氣象觀測</h1>
+<div class="subtitle" id="stationSubtitle">日本氣象廳 AMeDAS · 東京觀測站 44132</div>
+<div class="city-picker"><label for="citySelect">選擇城市 / SELECT CITY</label>
+<select id="citySelect"><option value="tokyo">東京 · Tokyo</option><option value="taipei">台北 · Taipei</option><option value="seoul">首爾 · Seoul</option><option value="new-york">紐約 · New York</option><option value="paris">巴黎 · Paris</option><option value="sapporo">札幌 · Sapporo</option><option value="singapore">新加坡 · Singapore</option></select></div>
 
 <div class="card hero">
   <div id="status" class="status loading" role="status" aria-live="polite">正在取得觀測資料…</div>
@@ -80,7 +82,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   <div class="metric">
     <div class="metric-label">💧 相對濕度 / RH</div>
     <div class="metric-value" id="humidityValue">—</div>
-    <div class="metric-note">觀測值</div>
+    <div class="metric-note" id="humidityNote">觀測值</div>
   </div>
   <div class="metric">
     <div class="metric-label">🌡️ 露點溫度</div>
@@ -90,7 +92,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   <div class="metric">
     <div class="metric-label">💨 平均風速</div>
     <div class="metric-value" id="windSpeedValue">—</div>
-    <div class="metric-note">過去 10 分鐘平均 · m/s</div>
+    <div class="metric-note" id="windNote">過去 10 分鐘平均 · m/s</div>
   </div>
   <div class="metric">
     <div class="metric-label">🧭 風向</div>
@@ -114,10 +116,10 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div id="autoPanel" class="card">
-  <div class="section-title">觀測資料狀態</div>
-  <p class="desc">每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。</p>
+  <div class="section-title">氣象資料狀態</div>
+  <p class="desc" id="sourceDescription">每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。</p>
   <div class="source-row">
-    <span class="tag">來源：JMA 東京站</span>
+    <span class="tag" id="sourceDetail">來源：JMA 東京站</span>
     <button class="mini" id="refresh" type="button">↻ 立即更新</button>
   </div>
 </div>
@@ -150,12 +152,45 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
-<p class="muted">資料來源：日本氣象廳 AMeDAS 東京觀測站（44132）。氣溫、濕度為觀測值；露點由 Magnus 公式估算。觀測可能延遲，資料失效時不會冒充即時數據。模擬器可離線使用。<br>平均風速與風向為 JMA 觀測值（若無資料則顯示 —）。本版本尚未提供氣壓、降雨或歷史趨勢。</p>
+<p class="muted" id="footerSource">東京使用日本氣象廳 JMA AMeDAS 實測資料；其他六座城市使用 Open-Meteo 近期氣象模型資料（不是官方測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const t=$('temp'),h=$('rh');
-let mode='auto',lastObs=null,requestInFlight=false;
+let mode='auto',lastObs=null,requestInFlight=false,activeController=null,requestId=0;
+const CITIES={
+ tokyo:{name:'東京',zone:'Asia/Tokyo',source:'JMA · 東京',subtitle:'日本氣象廳 AMeDAS · 東京觀測站 44132',isJMA:true},
+ taipei:{name:'台北',zone:'Asia/Taipei'},seoul:{name:'首爾',zone:'Asia/Seoul'},
+ 'new-york':{name:'紐約',zone:'America/New_York'},paris:{name:'巴黎',zone:'Europe/Paris'},
+ sapporo:{name:'札幌',zone:'Asia/Tokyo'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
+};
+let city='tokyo';
+function cityInfo(){return CITIES[city]}
+function citySource(){return cityInfo().isJMA?'JMA · 東京':'Open-Meteo · 模型'}
+function updateCityLabels(){
+ const c=cityInfo(),j=c.isJMA;
+ $('pageTitle').textContent=c.name+'氣象觀測';
+ $('stationSubtitle').textContent=j?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
+ $('sourceTag').textContent=mode==='manual'?'手動模擬':citySource();
+ $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
+ $('sourceDetail').textContent=j?'來源：JMA 東京站':'來源：Open-Meteo 模型';
+ $('humidityNote').textContent=j?'觀測值':'模型估計值';
+ $('windNote').textContent=j?'過去 10 分鐘平均 · m/s':'模型風速 · m/s';
+}
+function clearObservation(){
+ $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';
+ $('category').textContent='等待資料';$('comfortDescription').textContent='取得氣象資料後，將依露點估算空氣濕潤程度。';
+ $('dot').style.visibility='hidden';$('observedAt').textContent='資料時間：讀取中';showWind(null);
+}
+function switchCity(next){
+ if(!CITIES[next]||next===city)return;
+ city=next;lastObs=null;requestId++;if(activeController)activeController.abort();activeController=null;requestInFlight=false;
+ $('refresh').disabled=false;
+ try{localStorage.setItem('meteo-city',city)}catch(e){}
+ updateCityLabels();
+ if(mode==='manual')setMode('auto');else{clearObservation();fetchLatest()}
+}
+
 const WIND_DIRECTIONS=['靜穩','北北東','東北','東北東','東','東南東','東南','南南東','南','南南西','西南','西南西','西','西北西','西北','北北西','北'];
 function showWind(obs){
  const speed=obs?.windSpeed,dir=obs?.windDirection;
@@ -203,50 +238,49 @@ function setMode(m){
  $('manualMode').setAttribute('aria-pressed',String(!a));
  $('autoPanel').hidden=!a;$('manualPanel').hidden=a;
  $('heroLabel').textContent=a?'目前氣溫':'模擬氣溫';
- $('sourceTag').textContent=a?'JMA · 東京':'手動模擬';
+ $('sourceTag').textContent=a?citySource():'手動模擬';
  if(a){
    if(lastObs)applyObservation(lastObs);
-   else { $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';$('category').textContent='等待資料';$('comfortDescription').textContent='取得觀測資料後，將依露點估算空氣濕潤程度。';$('dot').style.visibility='hidden';showWind(null); }
+   else clearObservation();
    fetchLatest();
  }else{
    try{const saved=JSON.parse(localStorage.getItem('dewpoint-settings'));if(saved&&Number.isFinite(+saved.t)&&Number.isFinite(+saved.h)){t.value=saved.t;h.value=saved.h}}catch(e){}
    $('observedAt').textContent='模擬數值 · 非實際觀測';
    setStatus('氣象模擬器','ok');
-   manualUpdate();
+   manualUpdate();showWind(null);
  }
 }
 function applyObservation(obs){
  if(mode!=='auto')return;
  const temp=Number(obs.temperature),rh=Number(obs.humidity);
- showValues(temp,rh);
- showWind(obs);
- const date=new Date(obs.observedAt);
- const valid=Number.isFinite(date.getTime());
- $('observedAt').textContent='觀測時間：'+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date)+' JST':'未知');
+ showValues(temp,rh);showWind(obs);
+ const date=new Date(obs.observedAt),valid=Number.isFinite(date.getTime()),c=cityInfo();
+ $('observedAt').textContent=(c.isJMA?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
  const age=Date.now()-date.getTime();
- const stale=!valid||age>30*60*1000||age< -5*60*1000;
- setStatus(stale?'⚠ 觀測資料已延遲':'東京 AMeDAS · 已更新',stale?'stale':'ok');
+ const stale=!valid||age>(c.isJMA?30:180)*60*1000||age< -65*60*1000;
+ setStatus(stale?'⚠ 資料時間異常或已延遲':c.name+(c.isJMA?' AMeDAS · 已更新':' · 模型資料已更新'),stale?'stale':'ok');
 }
 async function fetchLatest(){
  if(requestInFlight||mode!=='auto')return;
  requestInFlight=true;$('refresh').disabled=true;
- setStatus('正在更新氣象廳資料…','loading');
+ const currentId=++requestId,currentCity=city,controller=new AbortController();activeController=controller;
+ setStatus('正在更新'+cityInfo().name+'氣象資料…','loading');
  try{
-   const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),14000);
+   const timer=setTimeout(()=>controller.abort(),14000);
    let response;
-   try{response=await fetch('/.netlify/functions/tokyo-weather',{cache:'no-store',signal:ctl.signal})}
+   try{response=await fetch(currentCity==='tokyo'? '/.netlify/functions/tokyo-weather':'/.netlify/functions/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
    finally{clearTimeout(timer)}
    const data=await response.json();
    if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
-   if(!Number.isFinite(data.temperature)||!Number.isFinite(data.humidity)||data.humidity<1||data.humidity>100||!data.observedAt||!Number.isFinite(new Date(data.observedAt).getTime()))throw new Error('觀測資料格式不完整');
+   if(!Number.isFinite(data.temperature)||!Number.isFinite(data.humidity)||data.humidity<1||data.humidity>100||!data.observedAt||!Number.isFinite(new Date(data.observedAt).getTime()))throw new Error('氣象資料格式不完整');
+   if(currentId!==requestId||currentCity!==city||mode!=='auto')return;
    lastObs=data;applyObservation(data);
  }catch(e){
-   if(mode==='auto'){
-     setStatus('⚠ 無法更新：'+e.message,'error');
-     if(lastObs){applyObservation(lastObs);setStatus('⚠ 無法更新，顯示上次取得的觀測資料','error')}
-     else $('observedAt').textContent='尚未取得有效觀測值';
+   if(currentId===requestId&&mode==='auto'){
+     if(lastObs){applyObservation(lastObs);setStatus('⚠ 無法更新，顯示上次取得的資料','error')}
+     else{$('observedAt').textContent='尚未取得有效氣象資料';setStatus('⚠ 無法更新：'+e.message,'error')}
    }
- }finally{$('refresh').disabled=false;requestInFlight=false}
+ }finally{if(currentId===requestId){$('refresh').disabled=false;requestInFlight=false;activeController=null}}
 }
 t.addEventListener('input',()=>{if(mode==='manual')manualUpdate()});
 h.addEventListener('input',()=>{if(mode==='manual')manualUpdate()});
@@ -263,13 +297,16 @@ $('copy').onclick=async()=>{
  const rh=mode==='auto'?(lastObs?Number(lastObs.humidity):NaN):Number(h.value);
  if(!Number.isFinite(temp)||!Number.isFinite(rh)){alert('目前沒有可複製的有效觀測數據');return}
  const d=calculate(temp,rh);
- const s=`${mode==='auto'?'東京 AMeDAS · '+lastObs.observedAt:'氣象模擬器（非實測）'}\n氣溫：${temp.toFixed(1)}°C\n相對濕度：${rh}%\n露點（推算）：${d.toFixed(1)}°C`;
+ const wind=mode==='auto'&&lastObs&&Number.isFinite(lastObs.windSpeed)?'\n風速：'+lastObs.windSpeed.toFixed(1)+' m/s\n風向：'+$('windDirectionValue').textContent:'';
+ const s=`${mode==='auto'?cityInfo().name+' '+citySource()+' · '+lastObs.observedAt:'氣象模擬器（非實測）'}\n氣溫：${temp.toFixed(1)}°C\n相對濕度：${rh}%\n露點（推算）：${d.toFixed(1)}°C${wind}`;
  try{await navigator.clipboard.writeText(s);alert('已複製數據')}catch(e){prompt('複製數據',s)}
 };
 $('autoMode').onclick=()=>setMode('auto');
 $('manualMode').onclick=()=>setMode('manual');
 $('refresh').onclick=fetchLatest;
-setMode('auto');
+$('citySelect').onchange=e=>switchCity(e.target.value);
+try{const savedCity=localStorage.getItem('meteo-city');if(CITIES[savedCity])city=savedCity}catch(e){}
+$('citySelect').value=city;updateCityLabels();setMode('auto');
 setInterval(()=>{if(mode==='auto'&&!document.hidden)fetchLatest()},600000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&mode==='auto')fetchLatest()});
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
