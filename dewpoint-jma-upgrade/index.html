@@ -219,6 +219,7 @@ function applyObservation(obs){
  if(mode!=='auto')return;
  const temp=Number(obs.temperature),rh=Number(obs.humidity);
  showValues(temp,rh);
+ showWind(obs);
  const date=new Date(obs.observedAt);
  const valid=Number.isFinite(date.getTime());
  $('observedAt').textContent='觀測時間：'+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date)+' JST':'未知');
