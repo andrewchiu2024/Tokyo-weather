@@ -87,6 +87,16 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <div class="metric-value" id="dew">—</div>
     <div class="metric-note">Magnus 公式推算</div>
   </div>
+  <div class="metric">
+    <div class="metric-label">💨 平均風速</div>
+    <div class="metric-value" id="windSpeedValue">—</div>
+    <div class="metric-note">過去 10 分鐘平均 · m/s</div>
+  </div>
+  <div class="metric">
+    <div class="metric-label">🧭 風向</div>
+    <div class="metric-value" id="windDirectionValue">—</div>
+    <div class="metric-note">16 方位 · 風的來向</div>
+  </div>
 </div>
 
 <div class="card">
@@ -140,12 +150,18 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
-<p class="muted">資料來源：日本氣象廳 AMeDAS 東京觀測站（44132）。氣溫、濕度為觀測值；露點由 Magnus 公式估算。觀測可能延遲，資料失效時不會冒充即時數據。模擬器可離線使用。<br>本版本未提供氣壓、風速、降雨或歷史趨勢，待後續確認資料來源後再加入。</p>
+<p class="muted">資料來源：日本氣象廳 AMeDAS 東京觀測站（44132）。氣溫、濕度為觀測值；露點由 Magnus 公式估算。觀測可能延遲，資料失效時不會冒充即時數據。模擬器可離線使用。<br>平均風速與風向為 JMA 觀測值（若無資料則顯示 —）。本版本尚未提供氣壓、降雨或歷史趨勢。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const t=$('temp'),h=$('rh');
 let mode='auto',lastObs=null,requestInFlight=false;
+const WIND_DIRECTIONS=['靜穩','北北東','東北','東北東','東','東南東','東南','南南東','南','南南西','西南','西南西','西','西北西','西北','北北西','北'];
+function showWind(obs){
+ const speed=obs?.windSpeed,dir=obs?.windDirection;
+ $('windSpeedValue').textContent=typeof speed==='number'&&Number.isFinite(speed)?speed.toFixed(1)+' m/s':'—';
+ $('windDirectionValue').textContent=Number.isInteger(dir)&&dir>=0&&dir<=16?WIND_DIRECTIONS[dir]:'—';
+}
 try{const saved=JSON.parse(localStorage.getItem('dewpoint-settings'));if(saved&&Number.isFinite(+saved.t)&&Number.isFinite(+saved.h)){t.value=saved.t;h.value=saved.h}}catch(e){}
 function calculate(temp,rh){
  const g=Math.log(rh/100)+17.625*temp/(243.04+temp);
@@ -190,7 +206,7 @@ function setMode(m){
  $('sourceTag').textContent=a?'JMA · 東京':'手動模擬';
  if(a){
    if(lastObs)applyObservation(lastObs);
-   else { $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';$('category').textContent='等待資料';$('comfortDescription').textContent='取得觀測資料後，將依露點估算空氣濕潤程度。';$('dot').style.visibility='hidden'; }
+   else { $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';$('category').textContent='等待資料';$('comfortDescription').textContent='取得觀測資料後，將依露點估算空氣濕潤程度。';$('dot').style.visibility='hidden';showWind(null); }
    fetchLatest();
  }else{
    try{const saved=JSON.parse(localStorage.getItem('dewpoint-settings'));if(saved&&Number.isFinite(+saved.t)&&Number.isFinite(+saved.h)){t.value=saved.t;h.value=saved.h}}catch(e){}
