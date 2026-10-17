@@ -1,1 +1,23 @@
-{"name":"露點溫度計算器","short_name":"露點計算","start_url":"./index.html","display":"standalone","background_color":"#101c2b","theme_color":"#101c2b","icons":[{"src":"icon.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},{"src":"icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
+{
+  "name": "東京氣象觀測",
+  "short_name": "東京氣象",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#101c2b",
+  "theme_color": "#101c2b",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "description": "東京 AMeDAS 氣溫、濕度與露點觀測儀表板"
+}
