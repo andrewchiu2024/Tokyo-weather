@@ -182,7 +182,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
-<p class="muted" id="footerSource">東京使用日本氣象廳 JMA AMeDAS 實測資料；其他六座城市使用 Open-Meteo 近期氣象模型資料（不是官方測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。手動模擬器可離線使用。未提供歷史趨勢。</p>
+<p class="muted" id="footerSource">東京使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘五座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -190,22 +190,22 @@ const t=$('temp'),h=$('rh');
 let mode='auto',lastObs=null,requestInFlight=false,activeController=null,requestId=0;
 const CITIES={
  tokyo:{name:'東京',zone:'Asia/Tokyo',source:'JMA · 東京',subtitle:'日本氣象廳 AMeDAS · 東京觀測站 44132',isJMA:true},
- taipei:{name:'台北',zone:'Asia/Taipei'},seoul:{name:'首爾',zone:'Asia/Seoul'},
+ taipei:{name:'台北',zone:'Asia/Taipei',isCWA:true,source:'CWA · 臺北',subtitle:'中央氣象署 CWA · 臺北氣象站 466920'},seoul:{name:'首爾',zone:'Asia/Seoul'},
  'new-york':{name:'紐約',zone:'America/New_York'},paris:{name:'巴黎',zone:'Europe/Paris'},
  sapporo:{name:'札幌',zone:'Asia/Tokyo'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
 };
 let city='tokyo';
 function cityInfo(){return CITIES[city]}
-function citySource(){return cityInfo().isJMA?'JMA · 東京':'Open-Meteo · 模型'}
+function citySource(){return cityInfo().isJMA?'JMA · 東京':cityInfo().isCWA?'CWA · 臺北':'Open-Meteo · 模型'}
 function updateCityLabels(){
- const c=cityInfo(),j=c.isJMA;
+ const c=cityInfo(),j=c.isJMA,o=j||c.isCWA;
  $('pageTitle').textContent='即時氣象觀測';
- $('stationSubtitle').textContent=j?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
+ $('stationSubtitle').textContent=o?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
  $('sourceTag').textContent=mode==='manual'?'手動模擬':citySource();
- $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
- $('sourceDetail').textContent=j?'來源：JMA 東京站':'來源：Open-Meteo 模型';
- $('humidityNote').textContent=j?'觀測值':'模型估計值';
- $('windNote').textContent=j?'過去 10 分鐘平均 · m/s':'模型風速 · m/s';
+ $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':c.isCWA?'每 10 分鐘嘗試讀取中央氣象署臺北站官方觀測資料；實際時間以 CWA 回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
+ $('sourceDetail').textContent=j?'來源：JMA 東京站':c.isCWA?'來源：CWA 臺北站':'來源：Open-Meteo 模型';
+ $('humidityNote').textContent=o?'觀測值':'模型估計值';
+ $('windNote').textContent=j?'過去 10 分鐘平均 · m/s':c.isCWA?'測站平均風速 · m/s':'模型風速 · m/s';
 }
 function clearObservation(){
  $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';
@@ -285,10 +285,10 @@ function applyObservation(obs){
  const temp=Number(obs.temperature),rh=Number(obs.humidity);
  showValues(temp,rh);showWind(obs);
  const date=new Date(obs.observedAt),valid=Number.isFinite(date.getTime()),c=cityInfo();
- $('observedAt').textContent=(c.isJMA?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
+ $('observedAt').textContent=((c.isJMA||c.isCWA)?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
  const age=Date.now()-date.getTime();
- const stale=!valid||age>(c.isJMA?30:180)*60*1000||age< -65*60*1000;
- setStatus(stale?'⚠ 資料時間異常或已延遲':c.name+(c.isJMA?' AMeDAS · 已更新':' · 模型資料已更新'),stale?'stale':'ok');
+ const stale=!valid||age>((c.isJMA||c.isCWA)?30:180)*60*1000||age< -65*60*1000;
+ setStatus(stale?'⚠ 資料時間異常或已延遲':c.name+(c.isJMA?' AMeDAS · 已更新':c.isCWA?' CWA · 已更新':' · 模型資料已更新'),stale?'stale':'ok');
 }
 async function fetchLatest(){
  if(requestInFlight||mode!=='auto')return;
