@@ -201,7 +201,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 <p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
-// Tokyo Meteo icon-loading fix v1.5.2 (2026-10-18)
+// Tokyo Meteo wind-direction display fix v1.5.3 (2026-10-18)
 const $=id=>document.getElementById(id);
 const t=$('temp'),h=$('rh');
 let mode='auto',lastObs=null,requestInFlight=false,activeController=null,requestId=0;
@@ -316,7 +316,7 @@ const WIND_DIRECTIONS=['靜穩','北北東','東北','東北東','東','東南�
 function showWind(obs){
  const speed=obs?.windSpeed,dir=obs?.windDirection;
  $('windSpeedValue').textContent=typeof speed==='number'&&Number.isFinite(speed)?speed.toFixed(1)+' m/s':'—';
- $('windDirectionValue').textContent=Number.isInteger(dir)&&dir>=0&&dir<=16?WIND_DIRECTIONS[dir]:'—';
+ $('windDirectionValue').textContent=Number.isInteger(dir)&&dir>=0&&dir<=16?WIND_DIRECTIONS[dir]:(typeof dir==='string'&&dir.trim()&&dir.trim()!=='—'?dir.trim():'—');
 }
 try{const saved=JSON.parse(localStorage.getItem('dewpoint-settings'));if(saved&&Number.isFinite(+saved.t)&&Number.isFinite(+saved.h)){t.value=saved.t;h.value=saved.h}}catch(e){}
 function calculate(temp,rh){
