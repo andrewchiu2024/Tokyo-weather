@@ -27,7 +27,7 @@ h1{font-size:28px;margin:7px 0 5px;letter-spacing:-.5px}
 .temperature-line{display:flex;align-items:center;justify-content:flex-start;gap:9px;flex-wrap:nowrap;margin:9px 0 5px}
 .temperature-line .big{margin:0;white-space:nowrap}
 .weather-symbol{width:55px;height:55px;flex:none;display:flex;align-items:center;justify-content:center;color:#f3d18b}
-.weather-symbol{transition:opacity .18s ease}.weather-symbol.is-empty,.weather-symbol:empty{opacity:0;visibility:hidden}.weather-symbol.is-empty svg{display:none}.weather-symbol svg{width:100%;height:100%;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.weather-symbol{transition:opacity .18s ease}.weather-symbol.is-empty,.weather-symbol:empty{opacity:0;visibility:hidden}.weather-symbol.is-empty svg{display:none}.weather-symbol svg{width:100%;height:100%;fill:none;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
 .condition-name{font-size:17px;font-weight:700;margin:3px 0 3px;color:#f4f8fc}
 .condition-source{font-size:11px;color:#a8c7d8;margin:0 0 15px;line-height:1.5}
 .weather-story{margin:0 0 19px;padding:13px 15px;border-radius:13px;background:rgba(8,25,39,.22);border:1px solid rgba(168,204,226,.14)}
@@ -223,7 +223,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 <p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
-// Tokyo Meteo wind-direction display fix v1.5.3 (2026-10-18)
+// Tokyo Meteo original multicolor outline weather icons (2026-10-18)
 const $=id=>document.getElementById(id);
 const t=$('temp'),h=$('rh');
 let mode='auto',lastObs=null,requestInFlight=false,activeController=null,requestId=0;
@@ -367,16 +367,18 @@ document.querySelector('main').addEventListener('touchend',event=>{
 },{passive:true});
 
 
+// Minimal multicolor outline icons matching the original Tokyo Meteo mockup.
+// Individual SVG elements carry their own stroke colors; no external assets required.
 const WEATHER_ICONS={
- sun:'<circle cx="24" cy="24" r="8"/><path d="M24 3v8M24 37v8M3 24h8M37 24h8M9 9l6 6M33 33l6 6M39 9l-6 6M15 33l-6 6"/>',
- moon:'<path d="M39 31A17 17 0 0 1 17 9 18 18 0 1 0 39 31Z"/>',
- cloud:'<path d="M12 36h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19Z"/>',
- partly:'<circle cx="17" cy="16" r="7"/><path d="M17 4v4M5 16h4M8 7l3 3M27 7l-3 3M12 36h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19Z"/>',
- rain:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM15 37l-3 6M26 37l-3 6M37 37l-3 6"/>',
- drizzle:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM16 38v2M26 38v2M36 38v2"/>',
- snow:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM16 38v7m-3.5-3.5h7M31 38v7m-3.5-3.5h7"/>',
- thunder:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM26 31l-7 10h8l-4 7"/>',
- fog:'<path d="M12 26h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM7 34h34M12 41h27"/>',
+ sun:'<circle cx="24" cy="24" r="8" stroke="#e5b13f"/><path d="M24 4v6M24 38v6M4 24h6M38 24h6M9.9 9.9l4.3 4.3M33.8 33.8l4.3 4.3M38.1 9.9l-4.3 4.3M14.2 33.8l-4.3 4.3" stroke="#e5b13f"/>',
+ moon:'<path d="M38 33A17 17 0 0 1 16 10 18 18 0 1 0 38 33Z" stroke="#d8d7a0"/>',
+ cloud:'<path d="M14 35h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 35Z" stroke="#b6bdc4"/>',
+ partly:'<path d="M16 6v4M5 17h4M8.5 9.5l3 3M25 9.5l-3 3" stroke="#e5b13f"/><circle cx="16" cy="17" r="7" stroke="#e5b13f"/><path d="M18 35h18a7 7 0 0 0 0-14c-1.5-5.5-9-7.6-13.1-3.8A9 9 0 0 0 18 35Z" stroke="#e5b13f"/>',
+ rain:'<path d="M14 30h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 30Z" stroke="#75b6e0"/><path d="M17 35l-3 8M28 35l-3 8M39 35l-3 8" stroke="#75b6e0"/>',
+ drizzle:'<path d="M14 30h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 30Z" stroke="#75b6e0"/><path d="M17 36v2M27 36v2M37 36v2M22 42v2M32 42v2" stroke="#75b6e0"/>',
+ snow:'<path d="M14 30h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 30Z" stroke="#94c7e2"/><path d="M17 36v5m-2.5-2.5h5M31 36v5m-2.5-2.5h5" stroke="#94c7e2"/>',
+ thunder:'<path d="M14 30h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 30Z" stroke="#d8b358"/><path d="M27 29l-8 11h8l-4 6" stroke="#d8b358"/>',
+ fog:'<path d="M14 27h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 27Z" stroke="#b6bdc4"/><path d="M8 35h32M13 42h22" stroke="#b6bdc4"/>',
  unknown:''
 };
 // Per-city forecast cache: instant city switching without placeholder question marks.
