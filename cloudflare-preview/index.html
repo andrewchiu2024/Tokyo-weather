@@ -88,6 +88,14 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 /* Two-page swipe navigation */
 .page-tabs{display:flex;gap:8px;margin:0 0 15px}.page-tabs button{flex:1;padding:12px 6px;font-size:13px}.page-tabs button.active{background:#85d8e5;color:#0b2836;border-color:#85d8e5;font-weight:750}
 .page-panel[hidden]{display:none!important}.forecast-card{background:#203a50;border:1px solid #3e5b70;border-radius:18px;padding:17px;margin-bottom:12px}.forecast-date{font-weight:750;font-size:15px}.forecast-day{display:flex;justify-content:space-between;gap:10px;align-items:center}.forecast-temps{font-size:19px;font-weight:750;white-space:nowrap}.forecast-low{color:#a9c5d7;font-size:15px}.forecast-humidity{font-size:13px;color:#b7d6e6;margin-top:9px}.forecast-bar{height:6px;border-radius:10px;background:#142d42;margin-top:10px;overflow:hidden}.forecast-bar>span{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,#72a8ed,#71c9ac)}.forecast-note{font-size:12px;line-height:1.7;color:#b7cedd;margin:10px 0 18px}.forecast-heading{font-size:21px;font-weight:750;margin:5px 0 6px}
+
+/* Seven-day trend dashboard */
+.trend-panel{background:#203a50;border:1px solid #3e5b70;border-radius:19px;padding:17px 13px 12px;margin-bottom:15px;overflow:hidden}
+.trend-title{font-size:16px;font-weight:750;margin:0 4px 4px}.trend-subtitle{font-size:11px;color:#a9c5d7;margin:0 4px 10px}
+.trend-chart{width:100%;height:auto;display:block;overflow:visible;touch-action:pan-y}.trend-chart text{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC",sans-serif}
+.trend-legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 4px 10px;font-size:12px;color:#c4d8e6}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+.trend-detail{background:#172f43;border:1px solid #436176;border-radius:15px;padding:14px 15px;margin:0 0 15px}.trend-detail-title{font-weight:750;margin-bottom:7px}.trend-detail-values{font-size:14px;line-height:1.9}.trend-detail-source{font-size:11px;color:#a9c5d7;line-height:1.7;margin-top:5px}
+.trend-tip{font-size:11px;color:#a9c5d7;margin:0 4px 8px}
 </style>
 </head>
 <body>
@@ -206,7 +214,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </section>
 <section class="page-panel" id="forecastPage" role="tabpanel" aria-labelledby="forecastTab" hidden>
   <div class="forecast-heading" id="forecastHeading">未來七天天氣預報</div>
-  <p class="forecast-note" id="forecastExplanation">顯示每日最高、最低氣溫與預測相對濕度。左右滑動切換分頁。</p>
+  <p class="forecast-note" id="forecastExplanation">以互動曲線圖顯示七天氣溫與濕度趨勢。左右滑動切換分頁。</p>
   <div id="forecastStatus" class="status loading" role="status" aria-live="polite">尚未載入預報</div>
   <div id="forecastDays"></div>
   <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
@@ -266,27 +274,80 @@ async function loadForecast(force=false){
   $('forecastStatus').className='status error';
  }
 }
+let selectedForecastDay=0;
 function renderForecast(data,stale=false){
- const frag=document.createDocumentFragment();
- data.days.slice(0,7).forEach((d,i)=>{
-  const high=d.tempMax,low=d.tempMin,mean=d.humidityAvg,min=d.humidityMin,max=d.humidityMax;
-  const card=document.createElement('div');card.className='forecast-card';
-  const line=document.createElement('div');line.className='forecast-day';
-  const label=document.createElement('div');label.className='forecast-date';label.textContent=formatForecastDate(d.date,CITIES[city].zone)+(i===0?' · 今天':'');
-  const temps=document.createElement('div');temps.className='forecast-temps';
-  temps.textContent=(Number.isFinite(high)?high.toFixed(0)+'°':'—')+' / '+(Number.isFinite(low)?low.toFixed(0)+'°':'—');
-  line.append(label,temps);
-  const humidity=document.createElement('div');humidity.className='forecast-humidity';
-  humidity.textContent=Number.isFinite(mean)?'💧 平均濕度 '+mean+'%'+(Number.isFinite(min)&&Number.isFinite(max)?'　（'+min+'–'+max+'%）':''):'💧 預測濕度：—';
-  const sources=document.createElement('div');sources.className='forecast-note';sources.style.margin='6px 0 0';
-  sources.textContent='氣溫：'+(d.tempSource||'未知')+'　·　濕度：'+(d.humiditySource||'未知');
-  card.append(line,humidity,sources);
-  if(Number.isFinite(mean)){const bar=document.createElement('div');bar.className='forecast-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,mean))+'%';bar.append(fill);card.append(bar);}
-  frag.append(card);
- });
- $('forecastDays').replaceChildren(frag);
+ const days=data.days.slice(0,7);
+ const root=$('forecastDays');root.replaceChildren();
+ if(!days.length)return;
+ selectedForecastDay=Math.max(0,Math.min(days.length-1,selectedForecastDay));
+ const create=(tag,cls,txt)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(txt!==undefined)el.textContent=txt;return el};
+ const svgNS='http://www.w3.org/2000/svg';
+ const svgEl=(tag,attrs={})=>{const el=document.createElementNS(svgNS,tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,String(v)));return el};
+ const xAt=i=>46+i*46;
+ const chart=(title,subtitle,series,minY,maxY,suffix)=>{
+  const panel=create('section','trend-panel');panel.append(create('div','trend-title',title),create('p','trend-subtitle',subtitle));
+  const legend=create('div','trend-legend');
+  for(const line of series){const item=create('span');const dot=create('span','legend-dot');dot.style.background=line.color;item.append(dot,document.createTextNode(line.label));legend.append(item)}
+  panel.append(legend);
+  const svg=svgEl('svg',{viewBox:'0 0 360 224',class:'trend-chart',role:'img','aria-label':title+'，七天趨勢曲線圖'});
+  const top=26,bottom=172,plotH=bottom-top;
+  const yAt=v=>bottom-(v-minY)/(maxY-minY)*plotH;
+  for(let k=0;k<=4;k++){
+   const val=minY+(maxY-minY)*k/4,y=yAt(val);
+   svg.append(svgEl('line',{x1:38,y1:y,x2:332,y2:y,stroke:'#456177','stroke-width':'.7','stroke-dasharray':'3 5'}));
+   const text=svgEl('text',{x:32,y:y+4,'text-anchor':'end',fill:'#a9c5d7','font-size':10});text.textContent=Math.round(val)+suffix;svg.append(text);
+  }
+  // The temperature area between high and low gives a quick visual of the daily range.
+  if(series.length===2){
+   const upper=series[0].values.map((v,i)=>Number.isFinite(v)?[xAt(i),yAt(v)]:null);
+   const lower=series[1].values.map((v,i)=>Number.isFinite(v)?[xAt(i),yAt(v)]:null);
+   if(upper.every(Boolean)&&lower.every(Boolean)){
+    const pts=[...upper,...lower.reverse()];svg.append(svgEl('polygon',{points:pts.map(a=>a.join(',')).join(' '),fill:'#f5b46c','fill-opacity':'.10'}));
+   }
+  }
+  series.forEach(line=>{
+   let segment=[];const flush=()=>{if(segment.length>1)svg.append(svgEl('polyline',{points:segment.map(p=>p.join(',')).join(' '),fill:'none',stroke:line.color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
+   line.values.forEach((v,i)=>{if(Number.isFinite(v))segment.push([xAt(i),yAt(v)]);else flush()});flush();
+   line.values.forEach((v,i)=>{if(!Number.isFinite(v))return;svg.append(svgEl('circle',{cx:xAt(i),cy:yAt(v),r:4,fill:line.color,stroke:'#203a50','stroke-width':2}));});
+  });
+  const cursor=svgEl('line',{x1:xAt(selectedForecastDay),y1:top,x2:xAt(selectedForecastDay),y2:bottom,stroke:'#d5e9f3','stroke-width':1.2,'stroke-dasharray':'4 4','pointer-events':'none'});svg.append(cursor);
+  days.forEach((day,i)=>{
+   const date=day.date.slice(5).replace('-','/');const txt=svgEl('text',{x:xAt(i),y:195,'text-anchor':'middle',fill:i===selectedForecastDay?'#ffffff':'#a9c5d7','font-size':11,'font-weight':i===selectedForecastDay?750:400});txt.textContent=date;svg.append(txt);
+   const hit=svgEl('rect',{x:xAt(i)-23,y:0,width:46,height:207,fill:'transparent',role:'button',tabindex:0,'aria-label':date+' 預報詳情'});
+   hit.addEventListener('click',()=>selectDay(i));hit.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDay(i)}});svg.append(hit);
+  });
+  panel.append(svg);return panel;
+ };
+ const highs=days.map(d=>Number.isFinite(d.tempMax)?d.tempMax:null),lows=days.map(d=>Number.isFinite(d.tempMin)?d.tempMin:null);
+ const humidities=days.map(d=>Number.isFinite(d.humidityAvg)?d.humidityAvg:null);
+ const finiteTemps=[...highs,...lows].filter(Number.isFinite);
+ const minTemp=finiteTemps.length?Math.floor((Math.min(...finiteTemps)-3)/5)*5:0;
+ const maxTemp=finiteTemps.length?Math.ceil((Math.max(...finiteTemps)+3)/5)*5:40;
+ root.append(chart('🌡️ 氣溫趨勢','每日最高與最低氣溫 · °C',[
+  {label:'最高氣溫',color:'#f5b46c',values:highs},{label:'最低氣溫',color:'#77baff',values:lows}
+ ],minTemp,maxTemp===minTemp?minTemp+5:maxTemp,'°'));
+ root.append(chart('💧 相對濕度趨勢','每日平均預測濕度 · %',[
+  {label:'平均濕度',color:'#76ddc0',values:humidities}
+ ],0,100,'%'));
+ root.append(create('p','trend-tip','點選曲線圖中的日期，查看當日數值與資料來源。'));
+ const detail=create('section','trend-detail');root.append(detail);
+ function selectDay(index){
+  selectedForecastDay=index;
+  // Refresh selection cursors on both charts without fetching the API again.
+  root.querySelectorAll('.trend-chart').forEach(svg=>{
+   const line=svg.querySelector('line[pointer-events="none"]');if(line){line.setAttribute('x1',xAt(index));line.setAttribute('x2',xAt(index))}
+   svg.querySelectorAll('text').forEach(t=>{if(t.getAttribute('y')==='195'){const i=Math.round((Number(t.getAttribute('x'))-46)/46);t.setAttribute('fill',i===index?'#ffffff':'#a9c5d7');t.setAttribute('font-weight',i===index?'750':'400')}});
+  });
+  const d=days[index];detail.replaceChildren();
+  detail.append(create('div','trend-detail-title',formatForecastDate(d.date,CITIES[city].zone)+(index===0?' · 今天':'')));
+  const num=v=>Number.isFinite(v)?Math.round(v):'—';
+  detail.append(create('div','trend-detail-values','最高 '+num(d.tempMax)+'°C　／　最低 '+num(d.tempMin)+'°C'));
+  detail.append(create('div','trend-detail-values','平均濕度 '+num(d.humidityAvg)+'%'+(Number.isFinite(d.humidityMin)&&Number.isFinite(d.humidityMax)?'　（'+num(d.humidityMin)+'–'+num(d.humidityMax)+'%）':'')));
+  detail.append(create('div','trend-detail-source','氣溫：'+(d.tempSource||'未知')+'　·　濕度：'+(d.humiditySource||'未知')));
+ }
+ selectDay(selectedForecastDay);
  if(!stale){
-  $('forecastStatus').textContent=data.officialStatus==='unavailable'?'⚠ 官方預報暫不可用，已使用 Open-Meteo 模型補足':'七天預報已更新 · 各欄位來源見下方';
+  $('forecastStatus').textContent=data.officialStatus==='unavailable'?'⚠ 官方預報暫不可用，已使用 Open-Meteo 模型補足':'七天預報已更新 · 點選圖表查看每日來源';
   $('forecastStatus').className='status '+(data.officialStatus==='unavailable'?'stale':'');
  }
 }
