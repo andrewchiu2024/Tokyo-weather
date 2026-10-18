@@ -23,6 +23,16 @@ h1{font-size:28px;margin:7px 0 5px;letter-spacing:-.5px}
 .hero{background:linear-gradient(145deg,#23445d,#203a50)}
 .kicker{font-size:13px;color:#b6d0df}
 .big{font-size:65px;font-weight:760;letter-spacing:-2.5px;line-height:1.25;margin:9px 0}
+/* Weather icon stays immediately beside the temperature, including narrow iPhones. */
+.temperature-line{display:flex;align-items:center;justify-content:flex-start;gap:9px;flex-wrap:nowrap;margin:9px 0 5px}
+.temperature-line .big{margin:0;white-space:nowrap}
+.weather-symbol{width:55px;height:55px;flex:none;display:flex;align-items:center;justify-content:center;color:#f3d18b}
+.weather-symbol svg{width:100%;height:100%;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.condition-name{font-size:17px;font-weight:700;margin:3px 0 3px;color:#f4f8fc}
+.condition-source{font-size:11px;color:#a8c7d8;margin:0 0 15px;line-height:1.5}
+.weather-story{margin:0 0 19px;padding:13px 15px;border-radius:13px;background:rgba(8,25,39,.22);border:1px solid rgba(168,204,226,.14)}
+.weather-story-title{font-size:17px;font-weight:750;letter-spacing:.2px;color:#e5f5ff;margin-bottom:5px}
+.weather-story-detail{font-size:12px;line-height:1.7;color:#b8d5e5}
 .hero-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#c2d7e4;font-size:12px}
 .status{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:#a2e7c8;margin:0 0 10px}
 .status:before{content:"";width:8px;height:8px;background:#7de3b5;border-radius:50%;flex-shrink:0}
@@ -74,7 +84,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .city-option:not([aria-selected="true"]) .city-check{visibility:hidden}
 @media(hover:hover){.city-option:hover{background:#29465b}}
 .tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
-@media(max-width:360px){.big{font-size:55px}.metric-value{font-size:27px}main{padding-left:14px;padding-right:14px}}
+@media(max-width:360px){.weather-symbol{width:46px;height:46px}.big{font-size:55px}.metric-value{font-size:27px}main{padding-left:14px;padding-right:14px}}
 </style>
 </head>
 <body>
@@ -101,7 +111,13 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 <div class="card hero">
   <div id="status" class="status loading" role="status" aria-live="polite">正在取得觀測資料…</div>
   <div class="kicker" id="heroLabel">目前氣溫</div>
-  <div class="big" id="heroTemp">—</div>
+  <div class="temperature-line"><div class="big" id="heroTemp">—</div><div class="weather-symbol" id="weatherSymbol" aria-hidden="true"></div></div>
+  <div class="condition-name" id="conditionName">正在取得天氣概況…</div>
+  <div class="condition-source" id="conditionSource">天氣現象與氣象數值的來源可能不同</div>
+  <div class="weather-story" id="weatherStory" aria-live="polite">
+    <div class="weather-story-title" id="weatherStoryTitle">正在分析天氣…</div>
+    <div class="weather-story-detail" id="weatherStoryDetail">取得氣溫與濕度後，將提供當地天氣描述。</div>
+  </div>
   <div class="hero-foot">
     <span id="observedAt">觀測時間：讀取中</span>
     <span class="tag" id="sourceTag">JMA · 東京</span>
@@ -182,7 +198,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
-<p class="muted" id="footerSource">東京使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘五座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。手動模擬器可離線使用。未提供歷史趨勢。</p>
+<p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -192,22 +208,65 @@ const CITIES={
  tokyo:{name:'東京',zone:'Asia/Tokyo',source:'JMA · 東京',subtitle:'日本氣象廳 AMeDAS · 東京觀測站 44132',isJMA:true},
  taipei:{name:'台北',zone:'Asia/Taipei',isCWA:true,source:'CWA · 臺北',subtitle:'中央氣象署 CWA · 臺北氣象站 466920'},seoul:{name:'首爾',zone:'Asia/Seoul'},
  'new-york':{name:'紐約',zone:'America/New_York'},paris:{name:'巴黎',zone:'Europe/Paris'},
- sapporo:{name:'札幌',zone:'Asia/Tokyo'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
+ sapporo:{name:'札幌',zone:'Asia/Tokyo',isJMA:true,source:'JMA · 札幌',subtitle:'日本氣象廳 AMeDAS · 札幌觀測站 14163'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
 };
 let city='tokyo';
+
+const WEATHER_ICONS={
+ sun:'<circle cx="24" cy="24" r="8"/><path d="M24 3v8M24 37v8M3 24h8M37 24h8M9 9l6 6M33 33l6 6M39 9l-6 6M15 33l-6 6"/>',
+ moon:'<path d="M39 31A17 17 0 0 1 17 9 18 18 0 1 0 39 31Z"/>',
+ cloud:'<path d="M12 36h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19Z"/>',
+ partly:'<circle cx="17" cy="16" r="7"/><path d="M17 4v4M5 16h4M8 7l3 3M27 7l-3 3M12 36h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19Z"/>',
+ rain:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM15 37l-3 6M26 37l-3 6M37 37l-3 6"/>',
+ drizzle:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM16 38v2M26 38v2M36 38v2"/>',
+ snow:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM16 38v7m-3.5-3.5h7M31 38v7m-3.5-3.5h7"/>',
+ thunder:'<path d="M12 31h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM26 31l-7 10h8l-4 7"/>',
+ fog:'<path d="M12 26h27a8 8 0 0 0 0-16 13 13 0 0 0-25-3 10 10 0 0 0-2 19ZM7 34h34M12 41h27"/>',
+ unknown:'<circle cx="24" cy="24" r="19"/><path d="M18 18a7 7 0 1 1 10 6c-3 2-4 3-4 7M24 37v1"/>'
+};
+function drawConditionIcon(kind){
+ const svg=WEATHER_ICONS[kind]||WEATHER_ICONS.unknown;
+ $('weatherSymbol').innerHTML='<svg viewBox="0 0 48 48" aria-hidden="true">'+svg+'</svg>';
+}
+function clearCondition(simulated=false){
+ $('conditionName').textContent=simulated?'天氣概況不適用':'正在取得天氣概況…';
+ $('conditionSource').textContent=simulated?'手動模擬不包含晴雨、雲量資料':'天氣現象另行取得，與氣象數值來源分開標示';
+ drawConditionIcon('unknown');
+}
+function showCondition(condition){
+ if(mode!=='auto')return;
+ if(!condition){clearCondition();return}
+ $('conditionName').textContent=condition.label||'天氣概況暫不可用';
+ $('conditionSource').textContent=condition.sourceLabel||'天氣概況來源未提供';
+ drawConditionIcon(condition.icon);
+}
+async function loadCondition(forCity,forRequest){
+ try{
+  const response=await fetch('/.netlify/functions/weather-condition?city='+encodeURIComponent(forCity),{cache:'no-store'});
+  const data=await response.json();
+  if(forCity!==city||forRequest!==requestId||mode!=='auto')return;
+  if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
+  if(lastObs){lastObs.weatherCondition=data;showCondition(data)}
+ }catch(e){
+  if(forCity!==city||forRequest!==requestId||mode!=='auto')return;
+  showCondition({label:'天氣概況暫不可用',icon:'unknown',sourceLabel:'官方／模型天氣概況取得失敗；不以氣溫推測晴雨'});
+ }
+}
+
 function cityInfo(){return CITIES[city]}
-function citySource(){return cityInfo().isJMA?'JMA · 東京':cityInfo().isCWA?'CWA · 臺北':'Open-Meteo · 模型'}
+function citySource(){return cityInfo().isJMA?'JMA · '+cityInfo().name:cityInfo().isCWA?'CWA · 臺北':'Open-Meteo · 模型'}
 function updateCityLabels(){
  const c=cityInfo(),j=c.isJMA,o=j||c.isCWA;
  $('pageTitle').textContent='即時氣象觀測';
  $('stationSubtitle').textContent=o?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
  $('sourceTag').textContent=mode==='manual'?'手動模擬':citySource();
- $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取東京 AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':c.isCWA?'每 10 分鐘嘗試讀取中央氣象署臺北站官方觀測資料；實際時間以 CWA 回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
- $('sourceDetail').textContent=j?'來源：JMA 東京站':c.isCWA?'來源：CWA 臺北站':'來源：Open-Meteo 模型';
+ $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取'+c.name+' AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':c.isCWA?'每 10 分鐘嘗試讀取中央氣象署臺北站官方觀測資料；實際時間以 CWA 回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
+ $('sourceDetail').textContent=j?'來源：JMA '+c.name+'站':c.isCWA?'來源：CWA 臺北站':'來源：Open-Meteo 模型';
  $('humidityNote').textContent=o?'觀測值':'模型估計值';
  $('windNote').textContent=j?'過去 10 分鐘平均 · m/s':c.isCWA?'測站平均風速 · m/s':'模型風速 · m/s';
 }
 function clearObservation(){
+ clearCondition();$('weatherStoryTitle').textContent='正在分析天氣…';$('weatherStoryDetail').textContent='取得有效資料後，將顯示當地天氣描述。';
  $('heroTemp').textContent='—';$('humidityValue').textContent='—';$('dew').textContent='—';
  $('category').textContent='等待資料';$('comfortDescription').textContent='取得氣象資料後，將依露點估算空氣濕潤程度。';
  $('dot').style.visibility='hidden';$('observedAt').textContent='資料時間：讀取中';showWind(null);
@@ -237,6 +296,37 @@ function describe(d){
  const desc=d<5?'空氣水氣含量偏低，容易感到乾燥。':d<13?'空氣相對乾爽，通常不易有濕黏感。':d<20?'空氣水氣適中至稍高，實際感受仍取決於氣溫與風速。':'空氣水氣含量較高，氣溫高時可能感到悶熱。';
  return {label,desc};
 }
+function localDaypart(zone){
+ const parts=new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+ const hour=Number(parts.find(p=>p.type==='hour')?.value);
+ return hour>=5&&hour<11?'早晨':hour>=11&&hour<14?'中午':hour>=14&&hour<17?'午後':hour>=17&&hour<20?'傍晚':hour>=20||hour<5?'夜間':'白天';
+}
+function weatherNarrative(temp,rh,dew,wind,simulated=false){
+ const period=localDaypart(cityInfo().zone);
+ const thermal=temp>=35?'酷熱':temp>=30?'炎熱':temp>=27?'偏熱':temp>=23?'溫暖':temp>=18?'舒適溫和':temp>=13?'微涼':temp>=7?'寒冷':temp>=0?'相當寒冷':'嚴寒';
+ const moisture=dew>=24?'非常潮濕':dew>=20?'潮濕':dew>=16?'略顯濕潤':dew<5?'乾燥':dew<12?'乾爽':'';
+ const title=`${thermal}${moisture?'・'+moisture:''}的${period}`;
+ const pieces=[];
+ if(temp>=30)pieces.push('氣溫偏高，戶外活動請留意補水');
+ else if(temp<=7)pieces.push('氣溫偏低，外出注意保暖');
+ else if(temp<=13)pieces.push('天氣偏涼，外出可備件外套');
+ else pieces.push('氣溫處於相對溫和的範圍');
+ if(dew>=24)pieces.push('空氣水氣很多，可能有明顯濕黏感');
+ else if(dew>=20)pieces.push('空氣較潮濕，炎熱時可能感到悶熱');
+ else if(dew<5)pieces.push('空氣非常乾燥，注意補充水分');
+ else if(dew<12)pieces.push('空氣相對乾爽');
+ if(Number.isFinite(wind)){
+  if(wind>=10.8)pieces.push('風勢強，戶外活動留意陣風');
+  else if(wind>=5.5)pieces.push('風勢較明顯');
+  else if(wind<1)pieces.push('風勢微弱');
+ }
+ return {title:(simulated?'模擬｜':'')+title,detail:pieces.join('；')+'。'+(simulated?'（依模擬數值推算，非實測）':'')};
+}
+function updateWeatherStory(temp,rh,dew,wind,simulated=false){
+ const narrative=weatherNarrative(temp,rh,dew,wind,simulated);
+ $('weatherStoryTitle').textContent=narrative.title;
+ $('weatherStoryDetail').textContent=narrative.detail;
+}
 function showValues(temp,rh){
  const d=calculate(temp,rh),info=describe(d);
  $('heroTemp').textContent=temp.toFixed(1)+'°C';
@@ -253,6 +343,8 @@ function showValues(temp,rh){
 function manualUpdate(){
  const temp=Number(t.value),rh=Number(h.value);
  const result=showValues(temp,rh);
+ clearCondition(true);
+ updateWeatherStory(temp,rh,result.d,NaN,true);
  try{localStorage.setItem('dewpoint-settings',JSON.stringify({t:temp,h:rh}))}catch(e){}
  return result;
 }
@@ -283,7 +375,9 @@ function setMode(m){
 function applyObservation(obs){
  if(mode!=='auto')return;
  const temp=Number(obs.temperature),rh=Number(obs.humidity);
- showValues(temp,rh);showWind(obs);
+ const values=showValues(temp,rh);showWind(obs);
+ showCondition(obs.weatherCondition);
+ updateWeatherStory(temp,rh,values.d,typeof obs.windSpeed==='number'?obs.windSpeed:NaN);
  const date=new Date(obs.observedAt),valid=Number.isFinite(date.getTime()),c=cityInfo();
  $('observedAt').textContent=((c.isJMA||c.isCWA)?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
  const age=Date.now()-date.getTime();
@@ -298,13 +392,14 @@ async function fetchLatest(){
  try{
    const timer=setTimeout(()=>controller.abort(),14000);
    let response;
-   try{response=await fetch(currentCity==='tokyo'? '/.netlify/functions/tokyo-weather':'/.netlify/functions/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
+   try{response=await fetch(currentCity==='tokyo'? '/.netlify/functions/tokyo-weather':currentCity==='sapporo'? '/.netlify/functions/sapporo-weather':'/.netlify/functions/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
    finally{clearTimeout(timer)}
    const data=await response.json();
    if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
    if(!Number.isFinite(data.temperature)||!Number.isFinite(data.humidity)||data.humidity<1||data.humidity>100||!data.observedAt||!Number.isFinite(new Date(data.observedAt).getTime()))throw new Error('氣象資料格式不完整');
    if(currentId!==requestId||currentCity!==city||mode!=='auto')return;
    lastObs=data;applyObservation(data);
+   loadCondition(currentCity,currentId);
  }catch(e){
    if(currentId===requestId&&mode==='auto'){
      if(lastObs){applyObservation(lastObs);setStatus('⚠ 無法更新，顯示上次取得的資料','error')}
