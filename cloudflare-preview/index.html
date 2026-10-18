@@ -85,6 +85,9 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 @media(hover:hover){.city-option:hover{background:#29465b}}
 .tag{font-size:11px;color:#a9d6e7;background:#284b60;padding:6px 9px;border-radius:8px}
 @media(max-width:360px){.weather-symbol{width:46px;height:46px}.big{font-size:55px}.metric-value{font-size:27px}main{padding-left:14px;padding-right:14px}}
+/* Two-page swipe navigation */
+.page-tabs{display:flex;gap:8px;margin:0 0 15px}.page-tabs button{flex:1;padding:12px 6px;font-size:13px}.page-tabs button.active{background:#85d8e5;color:#0b2836;border-color:#85d8e5;font-weight:750}
+.page-panel[hidden]{display:none!important}.forecast-card{background:#203a50;border:1px solid #3e5b70;border-radius:18px;padding:17px;margin-bottom:12px}.forecast-date{font-weight:750;font-size:15px}.forecast-day{display:flex;justify-content:space-between;gap:10px;align-items:center}.forecast-temps{font-size:19px;font-weight:750;white-space:nowrap}.forecast-low{color:#a9c5d7;font-size:15px}.forecast-humidity{font-size:13px;color:#b7d6e6;margin-top:9px}.forecast-bar{height:6px;border-radius:10px;background:#142d42;margin-top:10px;overflow:hidden}.forecast-bar>span{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,#72a8ed,#71c9ac)}.forecast-note{font-size:12px;line-height:1.7;color:#b7cedd;margin:10px 0 18px}.forecast-heading{font-size:21px;font-weight:750;margin:5px 0 6px}
 </style>
 </head>
 <body>
@@ -108,6 +111,8 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   </div>
 </details>
 
+<div class="page-tabs" role="tablist" aria-label="氣象分頁"><button type="button" id="observationsTab" class="active" role="tab" aria-selected="true" aria-controls="observationsPage">即時觀測</button><button type="button" id="forecastTab" role="tab" aria-selected="false" aria-controls="forecastPage">未來七天預報 →</button></div>
+<section class="page-panel" id="observationsPage" role="tabpanel" aria-labelledby="observationsTab">
 <div class="card hero">
   <div id="status" class="status loading" role="status" aria-live="polite">正在取得觀測資料…</div>
   <div class="kicker" id="heroLabel">目前氣溫</div>
@@ -198,6 +203,15 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 </div>
 
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
+</section>
+<section class="page-panel" id="forecastPage" role="tabpanel" aria-labelledby="forecastTab" hidden>
+  <div class="forecast-heading" id="forecastHeading">未來七天天氣預報</div>
+  <p class="forecast-note" id="forecastExplanation">顯示每日最高、最低氣溫與預測相對濕度。左右滑動切換分頁。</p>
+  <div id="forecastStatus" class="status loading" role="status" aria-live="polite">尚未載入預報</div>
+  <div id="forecastDays"></div>
+  <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
+  <button type="button" id="forecastRefresh" class="mini">↻ 更新七天預報</button>
+</section>
 <p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
 </main>
 <script>
@@ -212,6 +226,89 @@ const CITIES={
  sapporo:{name:'札幌',zone:'Asia/Tokyo',isJMA:true,source:'JMA · 札幌',subtitle:'日本氣象廳 AMeDAS · 札幌觀測站 14163'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
 };
 let city='tokyo';
+// Open-Meteo forecast coordinates (city centers); all seven cities use the same model forecast source.
+const FORECAST_LOCATIONS={tokyo:[35.6762,139.6503],taipei:[25.0330,121.5654],seoul:[37.5665,126.9780],'new-york':[40.7128,-74.0060],paris:[48.8566,2.3522],sapporo:[43.0618,141.3545],singapore:[1.3521,103.8198]};
+let activePage='observations',forecastController=null;
+const forecastCache=new Map();
+function setPage(page){
+ activePage=page;
+ const forecast=page==='forecast';
+ $('observationsPage').hidden=forecast;$('forecastPage').hidden=!forecast;
+ $('observationsTab').classList.toggle('active',!forecast);$('forecastTab').classList.toggle('active',forecast);
+ $('observationsTab').setAttribute('aria-selected',String(!forecast));$('forecastTab').setAttribute('aria-selected',String(forecast));
+ if(forecast)loadForecast();
+}
+function formatForecastDate(dateString,zone){
+ const date=new Date(dateString+'T12:00:00Z');
+ return new Intl.DateTimeFormat('zh-TW',{timeZone:'UTC',month:'numeric',day:'numeric',weekday:'short'}).format(date);
+}
+async function loadForecast(force=false){
+ if(activePage!=='forecast')return;
+ const forCity=city;
+ $('forecastHeading').textContent=CITIES[forCity].name+' · 未來七天預報';
+ const cached=forecastCache.get(forCity);
+ if(cached&&!force&&Date.now()-cached.saved<30*60*1000){renderForecast(cached.data);return;}
+ if(forecastController)forecastController.abort();
+ const controller=new AbortController();forecastController=controller;
+ $('forecastStatus').textContent='正在取得'+CITIES[forCity].name+'七天預報…';$('forecastStatus').className='status loading';
+ if(!cached)$('forecastDays').replaceChildren();
+ try{
+  const response=await fetch('/api/seven-day-forecast?city='+encodeURIComponent(forCity),{signal:controller.signal,cache:'no-store'});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
+  if(!Array.isArray(data.days)||!data.days.length)throw new Error('預報資料不完整');
+  if(city!==forCity||activePage!=='forecast'||controller.signal.aborted)return;
+  forecastCache.set(forCity,{data,saved:Date.now()});renderForecast(data);
+ }catch(e){
+  if(controller.signal.aborted||city!==forCity||activePage!=='forecast')return;
+  if(cached)renderForecast(cached.data,true);
+  $('forecastStatus').textContent='⚠ 預報暫時無法取得'+(cached?'，顯示上次資料':'：'+e.message);
+  $('forecastStatus').className='status error';
+ }
+}
+function renderForecast(data,stale=false){
+ const frag=document.createDocumentFragment();
+ data.days.slice(0,7).forEach((d,i)=>{
+  const high=d.tempMax,low=d.tempMin,mean=d.humidityAvg,min=d.humidityMin,max=d.humidityMax;
+  const card=document.createElement('div');card.className='forecast-card';
+  const line=document.createElement('div');line.className='forecast-day';
+  const label=document.createElement('div');label.className='forecast-date';label.textContent=formatForecastDate(d.date,CITIES[city].zone)+(i===0?' · 今天':'');
+  const temps=document.createElement('div');temps.className='forecast-temps';
+  temps.textContent=(Number.isFinite(high)?high.toFixed(0)+'°':'—')+' / '+(Number.isFinite(low)?low.toFixed(0)+'°':'—');
+  line.append(label,temps);
+  const humidity=document.createElement('div');humidity.className='forecast-humidity';
+  humidity.textContent=Number.isFinite(mean)?'💧 平均濕度 '+mean+'%'+(Number.isFinite(min)&&Number.isFinite(max)?'　（'+min+'–'+max+'%）':''):'💧 預測濕度：—';
+  const sources=document.createElement('div');sources.className='forecast-note';sources.style.margin='6px 0 0';
+  sources.textContent='氣溫：'+(d.tempSource||'未知')+'　·　濕度：'+(d.humiditySource||'未知');
+  card.append(line,humidity,sources);
+  if(Number.isFinite(mean)){const bar=document.createElement('div');bar.className='forecast-bar';const fill=document.createElement('span');fill.style.width=Math.max(0,Math.min(100,mean))+'%';bar.append(fill);card.append(bar);}
+  frag.append(card);
+ });
+ $('forecastDays').replaceChildren(frag);
+ if(!stale){
+  $('forecastStatus').textContent=data.officialStatus==='unavailable'?'⚠ 官方預報暫不可用，已使用 Open-Meteo 模型補足':'七天預報已更新 · 各欄位來源見下方';
+  $('forecastStatus').className='status '+(data.officialStatus==='unavailable'?'stale':'');
+ }
+}
+$('observationsTab').addEventListener('click',()=>setPage('observations'));
+$('forecastTab').addEventListener('click',()=>setPage('forecast'));
+$('forecastRefresh').addEventListener('click',()=>loadForecast(true));
+let swipeStart=null;
+document.querySelector('main').addEventListener('touchstart',event=>{
+ const target=event.target;
+ if(target.closest('button,input,summary,.city-picker')){swipeStart=null;return;}
+ const touch=event.touches[0];swipeStart={x:touch.clientX,y:touch.clientY};
+},{passive:true});
+document.querySelector('main').addEventListener('touchend',event=>{
+ if(!swipeStart)return;
+ const touch=event.changedTouches[0],dx=touch.clientX-swipeStart.x,dy=touch.clientY-swipeStart.y;
+ swipeStart=null;
+ if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.5){
+  if(dx<0&&activePage==='observations')setPage('forecast');
+  else if(dx>0&&activePage==='forecast')setPage('observations');
+ }
+},{passive:true});
+
 
 const WEATHER_ICONS={
  sun:'<circle cx="24" cy="24" r="8"/><path d="M24 3v8M24 37v8M3 24h8M37 24h8M9 9l6 6M33 33l6 6M39 9l-6 6M15 33l-6 6"/>',
@@ -309,6 +406,7 @@ function switchCity(next){
  $('refresh').disabled=false;
  try{localStorage.setItem('meteo-city',city)}catch(e){}
  updateCityLabels();
+ if(activePage==='forecast')loadForecast(true);
  if(mode==='manual')setMode('auto');else{clearObservation();fetchLatest()}
 }
 
