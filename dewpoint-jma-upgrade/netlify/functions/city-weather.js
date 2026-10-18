@@ -1,10 +1,9 @@
-// Taipei uses CWA official station observations; five other cities use Open-Meteo; Tokyo uses JMA.
+// Taipei uses CWA official station observations; four other cities use Open-Meteo; Tokyo uses JMA.
 const CITIES = Object.freeze({
   taipei: [25.0330, 121.5654],
   seoul: [37.5665, 126.9780],
   'new-york': [40.7128, -74.0060],
   paris: [48.8566, 2.3522],
-  sapporo: [43.0618, 141.3545],
   singapore: [1.3521, 103.8198]
 });
 
