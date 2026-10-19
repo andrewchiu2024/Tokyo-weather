@@ -121,6 +121,15 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .source-disclosure summary:focus-visible{outline:2px solid #85d8e5;outline-offset:2px;border-radius:5px}
 .source-disclosure .source-content{font-size:11px;line-height:1.85;color:#aac1d1;padding:0 2px 14px}
 .source-disclosure .source-content p{margin:0}
+/* My Cities v2.0 */
+.city-manager-open{width:100%;margin-top:7px;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700}
+.city-modal[hidden]{display:none!important}.city-modal{position:fixed;inset:0;z-index:100;background:rgba(5,14,24,.82);display:flex;align-items:center;justify-content:center;padding:16px}
+.city-dialog{width:min(100%,520px);max-height:90dvh;overflow:auto;background:#192f43;border:1px solid #54778b;border-radius:20px;padding:20px;box-shadow:0 15px 55px #0008}
+.city-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.city-dialog h2{margin:0;font-size:20px}
+.city-search{width:100%;background:#10283a;color:#fff;border:1px solid #65879b;border-radius:12px;padding:14px;font:inherit;outline-offset:2px}
+.city-search-results{margin:9px 0 16px;max-height:210px;overflow:auto}.city-result,.managed-city{display:flex;align-items:center;gap:7px;justify-content:space-between;padding:10px 6px;border-bottom:1px solid #385369}
+.city-result button,.managed-city button{padding:8px 11px;font-size:12px}.city-result-name{flex:1;min-width:0;font-size:13px;line-height:1.5}.city-result-name small{display:block;color:#a9c5d7}
+.city-manager-note{font-size:11px;color:#b7cedd;line-height:1.7;margin:9px 0}.managed-city .city-result-name{font-size:14px}.managed-city button:disabled{opacity:.3}
 </style>
 </head>
 <body>
@@ -141,8 +150,20 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <button type="button" class="city-option" role="option" data-city="paris" aria-selected="false">巴黎 · Paris <span class="city-check" aria-hidden="true">✓</span></button>
     <button type="button" class="city-option" role="option" data-city="sapporo" aria-selected="false">札幌 · Sapporo <span class="city-check" aria-hidden="true">✓</span></button>
     <button type="button" class="city-option" role="option" data-city="singapore" aria-selected="false">新加坡 · Singapore <span class="city-check" aria-hidden="true">✓</span></button>
+    <button type="button" class="city-manager-open" id="openCityManager">＋ 新增／管理城市</button>
   </div>
 </details>
+<div class="city-modal" id="cityModal" hidden>
+  <div class="city-dialog" role="dialog" aria-modal="true" aria-labelledby="cityDialogTitle">
+    <div class="city-dialog-head"><h2 id="cityDialogTitle">我的城市</h2><button type="button" id="closeCityManager" aria-label="關閉">✕</button></div>
+    <label for="citySearch" class="city-label">搜尋全球城市（中文／英文／當地語言）</label>
+    <input id="citySearch" class="city-search" type="search" placeholder="例如：大阪、London、Vancouver" autocomplete="off">
+    <div id="citySearchResults" class="city-search-results" aria-live="polite"></div>
+    <div class="section-title">我的城市 · 可調整順序</div>
+    <div id="managedCities"></div>
+    <p class="city-manager-note">城市清單只儲存在目前瀏覽器。原有東京、札幌、台北仍使用官方觀測；其他城市使用 Open-Meteo 模型資料。至少保留一座城市。</p>
+  </div>
+</div>
 
 <div class="page-tabs" role="tablist" aria-label="氣象分頁"><button type="button" id="observationsTab" class="active" role="tab" aria-selected="true" aria-controls="observationsPage">即時觀測</button><button type="button" id="forecastTab" role="tab" aria-selected="false" aria-controls="forecastPage">未來七天預報 →</button></div>
 <section class="page-panel" id="observationsPage" role="tabpanel" aria-labelledby="observationsTab">
@@ -232,7 +253,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 
 <section class="hourly-panel" aria-label="過去24小時氣溫觀測" id="historyPanel">
   <div class="hourly-title">過去 24 小時氣溫變化</div>
-  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C</p>
+  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每小時實測 · °C</p>
   <div id="historyChart"></div><div id="historyDetail" class="hourly-detail"></div>
   <div id="historyStatus" class="hourly-status">正在讀取測站歷史資料…</div>
 </section>
@@ -270,6 +291,24 @@ const CITIES={
  sapporo:{name:'札幌',zone:'Asia/Tokyo',isJMA:true,source:'JMA · 札幌',subtitle:'日本氣象廳 AMeDAS · 札幌觀測站 14163'},singapore:{name:'新加坡',zone:'Asia/Singapore'}
 };
 let city='tokyo';
+const ORIGINAL_CITY_KEYS=Object.keys(CITIES);
+const DEFAULT_CITY_ORDER=[...ORIGINAL_CITY_KEYS];
+let myCityOrder=[...DEFAULT_CITY_ORDER];
+try{
+ const saved=JSON.parse(localStorage.getItem('meteo-my-cities-v2')||'null');
+ if(saved&&Array.isArray(saved.order)&&saved.order.length){
+  for(const item of saved.custom||[]){
+   if(item&&/^geo-\d+$/.test(item.id)&&typeof item.name==='string'&&item.name.length<120&&Number.isFinite(item.lat)&&Number.isFinite(item.lon)&&Math.abs(item.lat)<=90&&Math.abs(item.lon)<=180&&typeof item.zone==='string'){
+    CITIES[item.id]={name:item.name,zone:item.zone,lat:item.lat,lon:item.lon,country:item.country||'',isCustom:true};
+   }
+  }
+  const keys=[...new Set(saved.order)].filter(k=>CITIES[k]);if(keys.length)myCityOrder=keys;
+ }
+}catch(e){}
+function saveMyCities(){try{localStorage.setItem('meteo-my-cities-v2',JSON.stringify({order:myCityOrder,custom:Object.entries(CITIES).filter(([,v])=>v.isCustom).map(([id,v])=>({id,name:v.name,zone:v.zone,lat:v.lat,lon:v.lon,country:v.country}))}))}catch(e){}}
+function isCustomCity(key=city){return Boolean(CITIES[key]?.isCustom)}
+function cityCoords(key){const c=CITIES[key];return c?.isCustom?[c.lat,c.lon]:FORECAST_LOCATIONS[key]}
+
 // Open-Meteo forecast coordinates (city centers); all seven cities use the same model forecast source.
 const FORECAST_LOCATIONS={tokyo:[35.6762,139.6503],taipei:[25.0330,121.5654],seoul:[37.5665,126.9780],'new-york':[40.7128,-74.0060],paris:[48.8566,2.3522],sapporo:[43.0618,141.3545],singapore:[1.3521,103.8198]};
 let activePage='observations',forecastController=null;
@@ -291,7 +330,7 @@ async function loadHistory(force=false){
  if(!CITIES[forCity].isJMA&&!CITIES[forCity].isCWA){panel.hidden=true;return;}
  panel.hidden=false;
  const isTaipei=Boolean(CITIES[forCity].isCWA);
- $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C';
+ $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每小時實測 · °C';
  const cached=historyCache.get(forCity);
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
  $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
@@ -303,7 +342,23 @@ async function loadHistory(force=false){
  }catch(e){if(city===forCity&&id===historyRequest){$('historyChart').replaceChildren();$('historyDetail').textContent='';$('historyStatus').textContent='⚠ '+(isTaipei?'CWA 臺北':'JMA')+' 歷史觀測暫不可用：'+e.message;}}
 }
 function renderHistory(data){
- const points=data.points,root=$('historyChart');root.replaceChildren();
+ // Keep the original JMA 10-minute measurements untouched; show one actual
+ // station reading per hour (prefer the exact hour, otherwise the nearest reading).
+ // Taipei already supplies hourly observations and is not resampled.
+ const rawPoints=data.points;
+ const points=CITIES[city].isJMA&&Array.isArray(rawPoints)?(()=>{
+  const hours=new Map();
+  for(const p of rawPoints){
+   const ms=Date.parse(p.time);
+   if(!Number.isFinite(ms)||!Number.isFinite(p.temp))continue;
+   const hour=Math.floor(ms/3600000);
+   const distance=ms-hour*3600000;
+   const previous=hours.get(hour);
+   if(!previous||distance<previous.distance)hours.set(hour,{point:p,distance});
+  }
+  return [...hours.entries()].sort((a,b)=>a[0]-b[0]).slice(-24).map(([,v])=>v.point);
+ })():rawPoints;
+ const root=$('historyChart');root.replaceChildren();
  if(!points?.length)return;
  const ns='http://www.w3.org/2000/svg';
  const el=(tag,a={})=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(a))n.setAttribute(k,String(v));return n};
@@ -314,9 +369,9 @@ function renderHistory(data){
  const ts=points.map(p=>Date.parse(p.time)),start=ts[0],span=Math.max(1,ts[ts.length-1]-start);
  const x=i=>left+(ts[i]-start)/span*(right-left);
  for(let i=0;i<=4;i++){const v=min+(max-min)*i/4,yy=y(v);svg.append(el('line',{x1:left,y1:yy,x2:right,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5','stroke-width':'.8'}));const t=el('text',{x:left-6,y:yy+3,'text-anchor':'end',fill:'#afc9da','font-size':10});t.textContent=Math.round(v)+'°';svg.append(t)}
- // Break the curve where the station has no readings for more than 20 minutes.
+ // Break the hourly display curve if there is a gap longer than 90 minutes.
  let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#73c5d9','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
- points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>(data.resolutionMinutes===60?90:20)*60000)flush();segment.push([x(i),y(p.temp)])});flush();
+ points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>90*60000)flush();segment.push([x(i),y(p.temp)])});flush();
  const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
  for(let i=0;i<5;i++){const idx=Math.round((points.length-1)*i/4),t=el('text',{x:x(idx),y:193,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#b7cedd','font-size':10});t.textContent=fmt(points[idx].time);svg.append(t)}
  const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1});const dot=el('circle',{r:4.5,fill:'#73c5d9',stroke:'#203a50','stroke-width':2});svg.append(cursor,dot);
@@ -338,7 +393,7 @@ async function loadHourly(force=false){
  $('hourlyStatus').textContent='正在取得逐小時氣溫預報…';
  if(!cached){$('hourlyChart').replaceChildren();$('hourlyDetail').textContent='';}
  try{
-  const [lat,lon]=FORECAST_LOCATIONS[forCity];
+  const [lat,lon]=cityCoords(forCity);
   const url='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&hourly=temperature_2m&forecast_hours=24&timezone=auto';
   const response=await fetch(url,{signal:controller.signal,cache:'no-store'});
   if(!response.ok)throw new Error('HTTP '+response.status);
@@ -401,8 +456,9 @@ async function loadForecast(force=false){
  $('forecastStatus').textContent='正在取得'+CITIES[forCity].name+'七天預報…';$('forecastStatus').className='status loading';
  if(!cached)$('forecastDays').replaceChildren();
  try{
-  const response=await fetch('/api/seven-day-forecast?city='+encodeURIComponent(forCity),{signal:controller.signal,cache:'no-store'});
-  const data=await response.json();
+  const response=await fetch(isCustomCity(forCity)?openMeteoDailyURL(forCity):'/api/seven-day-forecast?city='+encodeURIComponent(forCity),{signal:controller.signal,cache:'no-store'});
+   const raw=await response.json();
+   const data=isCustomCity(forCity)?normalizeOpenMeteoDaily(raw):raw;
   if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
   if(!Array.isArray(data.days)||!data.days.length)throw new Error('預報資料不完整');
   if(city!==forCity||activePage!=='forecast'||controller.signal.aborted)return;
@@ -568,7 +624,7 @@ function isNight(forCity){
 async function loadSolarTimes(forCity){
  const old=solarCache.get(forCity);
  if((old&&Date.now()-old.saved<6*3600000)||solarPending.has(forCity))return;
- const coords=FORECAST_LOCATIONS[forCity];if(!coords)return;
+ const coords=cityCoords(forCity);if(!coords)return;
  solarPending.add(forCity);
  try{
   const url='https://api.open-meteo.com/v1/forecast?latitude='+coords[0]+'&longitude='+coords[1]+'&daily=sunrise,sunset&forecast_days=3&timezone=auto&timeformat=unixtime';
@@ -803,17 +859,18 @@ async function fetchLatest(){
  requestInFlight=true;$('refresh').disabled=true;
  const currentId=++requestId,currentCity=city,controller=new AbortController();activeController=controller;
  setStatus('正在更新'+cityInfo().name+'氣象資料…','loading');
- loadCondition(currentCity,currentId);
+ if(!isCustomCity(currentCity))loadCondition(currentCity,currentId);
  try{
    const timer=setTimeout(()=>controller.abort(),14000);
    let response;
-   try{response=await fetch(currentCity==='tokyo'? '/api/tokyo-weather':currentCity==='sapporo'? '/api/sapporo-weather':'/api/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
+   try{response=await fetch(isCustomCity(currentCity)?openMeteoCurrentURL(currentCity):currentCity==='tokyo'? '/api/tokyo-weather':currentCity==='sapporo'? '/api/sapporo-weather':'/api/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
    finally{clearTimeout(timer)}
-   const data=await response.json();
+   const raw=await response.json();
+   const data=isCustomCity(currentCity)?normalizeOpenMeteoCurrent(raw):raw;
    if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
    if(!Number.isFinite(data.temperature)||!Number.isFinite(data.humidity)||data.humidity<1||data.humidity>100||!data.observedAt||!Number.isFinite(new Date(data.observedAt).getTime()))throw new Error('氣象資料格式不完整');
    if(currentId!==requestId||currentCity!==city||mode!=='auto')return;
-   lastObs=data;applyObservation(data);
+   lastObs=data;applyObservation(data);if(isCustomCity(currentCity)){const c=openMeteoCondition(data.weatherCode);const item={...c,sourceLabel:'Open-Meteo 天氣模型'};lastObs.weatherCondition=item;showCondition(item)}
  }catch(e){
    if(currentId===requestId&&mode==='auto'){
      if(lastObs){applyObservation(lastObs);setStatus('⚠ 無法更新，顯示上次取得的資料','error')}
@@ -843,26 +900,64 @@ $('copy').onclick=async()=>{
 $('autoMode').onclick=()=>setMode('auto');
 $('manualMode').onclick=()=>setMode('manual');
 $('refresh').onclick=fetchLatest;
-const cityOptions=[...document.querySelectorAll('.city-option')];
+let cityOptions=[];
 function syncCityMenu(){
  const selected=cityOptions.find(b=>b.dataset.city===city);
  if(selected)$('cityCurrent').textContent=selected.textContent.replace('✓','').trim();
  cityOptions.forEach(b=>b.setAttribute('aria-selected',String(b.dataset.city===city)));
 }
+// Rebuild the city selector after every city-list change.
+function rebuildCityMenu(){
+ const menu=$('cityMenu');menu.replaceChildren();
+ for(const key of myCityOrder){
+  const c=CITIES[key],b=document.createElement('button');b.type='button';b.className='city-option';b.dataset.city=key;b.setAttribute('role','option');
+  b.append(document.createTextNode(c.name+(c.isCustom&&c.country?' · '+c.country:'')));
+  const check=document.createElement('span');check.className='city-check';check.setAttribute('aria-hidden','true');check.textContent='✓';b.append(check);
+  b.addEventListener('click',()=>{switchCity(key);syncCityMenu();$('cityPicker').open=false});menu.append(b);
+ }
+ cityOptions=[...menu.querySelectorAll('.city-option')];syncCityMenu();
+}
 // Native <details> controls opening on iPhone without JavaScript.
 // Buttons only handle selection; no focus/pointer handlers interfere with touch.
-cityOptions.forEach(b=>{
+/* cityOptions.forEach(b=>{
  b.addEventListener('click',()=>{
    switchCity(b.dataset.city);
    syncCityMenu();
    $('cityPicker').open=false;
  });
-});
+}); */
 document.addEventListener('keydown',e=>{
  if(e.key==='Escape'&&$('cityPicker').open){$('cityPicker').open=false;$('cityTrigger').focus()}
 });
-try{const savedCity=localStorage.getItem('meteo-city');if(CITIES[savedCity])city=savedCity}catch(e){}
-syncCityMenu();updateCityLabels();setMode('auto');
+
+// Global cities use Open-Meteo; legacy city API routes remain untouched.
+function openMeteoCurrentURL(key){const [lat,lon]=cityCoords(key);return 'https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,weather_code&wind_speed_unit=ms&timezone=auto&timeformat=unixtime'}
+function normalizeOpenMeteoCurrent(data){const c=data.current||{},degree=Number(c.wind_direction_10m);return {temperature:c.temperature_2m==null?NaN:Number(c.temperature_2m),humidity:c.relative_humidity_2m==null?NaN:Number(c.relative_humidity_2m),windSpeed:c.wind_speed_10m==null?NaN:Number(c.wind_speed_10m),windDirection:Number.isFinite(degree)?Math.round(degree/22.5)%16||16:null,observedAt:Number.isFinite(c.time)?new Date(c.time*1000).toISOString():null,weatherCode:c.weather_code}}
+function openMeteoDailyURL(key){const [lat,lon]=cityCoords(key);return 'https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&daily=temperature_2m_max,temperature_2m_min&hourly=relative_humidity_2m&forecast_days=7&timezone=auto'}
+function normalizeOpenMeteoDaily(data){const d=data.daily||{},h=data.hourly||{},days=(d.time||[]).map((date,i)=>{const rh=(h.time||[]).map((t,j)=>t.slice(0,10)===date?Number(h.relative_humidity_2m[j]):NaN).filter(Number.isFinite);return {date,tempMax:Number(d.temperature_2m_max[i]),tempMin:Number(d.temperature_2m_min[i]),humidityAvg:rh.length?rh.reduce((a,b)=>a+b,0)/rh.length:null,humidityMin:rh.length?Math.min(...rh):null,humidityMax:rh.length?Math.max(...rh):null,tempSource:'Open-Meteo 模型',humiditySource:'Open-Meteo 模型'}});return {days,officialStatus:'model'}}
+function openMeteoCondition(code){if(code===0)return {label:'晴朗',icon:'sun'};if([1,2].includes(code))return {label:'晴時多雲',icon:'partly'};if(code===3)return {label:'多雲',icon:'cloud'};if([45,48].includes(code))return {label:'霧',icon:'fog'};if([51,53,55,56,57].includes(code))return {label:'毛毛雨',icon:'drizzle'};if([61,63,65,66,67,80,81,82].includes(code))return {label:'下雨',icon:'rain'};if([71,73,75,77,85,86].includes(code))return {label:'降雪',icon:'snow'};if([95,96,99].includes(code))return {label:'雷雨',icon:'thunder'};return {label:'天氣概況暫不可用',icon:null}}
+async function loadCustomCondition(key,id){try{const r=await fetch(openMeteoCurrentURL(key));if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(key!==city||id!==requestId||mode!=='auto')return;const c=openMeteoCondition(data.current?.weather_code);const item={...c,sourceLabel:'Open-Meteo 天氣模型'};if(lastObs)lastObs.weatherCondition=item;showCondition(item)}catch(e){if(key===city&&id===requestId)showCondition({label:'天氣概況暫不可用',icon:null,sourceLabel:'Open-Meteo 暫不可用'})}}
+const cityModal=$('cityModal'),citySearch=$('citySearch'),cityResults=$('citySearchResults');
+let searchTimer=null,searchController=null,searchSequence=0;
+function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();citySearch.focus() }
+function closeManager(){cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
+$('openCityManager').onclick=openManager;$('closeCityManager').onclick=closeManager;
+cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
+function renderManagedCities(){const root=$('managedCities');root.replaceChildren();myCityOrder.forEach((key,i)=>{const c=CITIES[key],row=document.createElement('div');row.className='managed-city';const label=document.createElement('span');label.className='city-result-name';label.textContent=c.name+(c.isCustom&&c.country?' · '+c.country:'');row.append(label);
+  const up=document.createElement('button');up.textContent='↑';up.title='往上移';up.disabled=i===0;up.onclick=()=>moveCity(i,-1);row.append(up);
+  const down=document.createElement('button');down.textContent='↓';down.title='往下移';down.disabled=i===myCityOrder.length-1;down.onclick=()=>moveCity(i,1);row.append(down);
+  const del=document.createElement('button');del.textContent='刪除';del.disabled=myCityOrder.length===1;del.onclick=()=>removeCity(key);row.append(del);root.append(row)})}
+function moveCity(i,d){const j=i+d;if(j<0||j>=myCityOrder.length)return;[myCityOrder[i],myCityOrder[j]]=[myCityOrder[j],myCityOrder[i]];saveMyCities();rebuildCityMenu();renderManagedCities()}
+function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder.filter(k=>k!==key);if(key===city)switchCity(myCityOrder[0]);if(CITIES[key]?.isCustom){delete CITIES[key];delete FORECAST_LOCATIONS[key];forecastCache.delete(key);hourlyCache.delete(key);conditionCache.delete(key)}saveMyCities();rebuildCityMenu();renderManagedCities()}
+function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
+function addCity(item){const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);closeManager()}
+function renderSearchResults(results){cityResults.replaceChildren();if(!results.length){cityResults.textContent='找不到符合的城市，請嘗試英文或當地名稱。';return}for(const item of results){if(!Number.isFinite(Number(item.latitude))||!Number.isFinite(Number(item.longitude))||!item.id)continue;const key=cityMatch(item)||'geo-'+item.id,row=document.createElement('div');row.className='city-result';const label=document.createElement('span');label.className='city-result-name';label.textContent=item.name;const sub=document.createElement('small');sub.textContent=[item.admin1,item.country].filter(Boolean).join(' · ');label.append(sub);const button=document.createElement('button');button.textContent=myCityOrder.includes(key)?'已加入':'＋ 加入';button.disabled=myCityOrder.includes(key);button.onclick=()=>addCity(item);row.append(label,button);cityResults.append(row)}}
+citySearch.addEventListener('input',()=>{clearTimeout(searchTimer);searchController?.abort();const q=citySearch.value.trim(),seq=++searchSequence;cityResults.replaceChildren();if(q.length<2){cityResults.textContent='請輸入至少兩個字元';return}cityResults.textContent='搜尋中…';searchTimer=setTimeout(async()=>{const controller=new AbortController();searchController=controller;try{const r=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=10&language=zh&format=json',{signal:controller.signal});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(seq===searchSequence)renderSearchResults(data.results||[])}catch(e){if(!controller.signal.aborted&&seq===searchSequence)cityResults.textContent='搜尋暫不可用，請稍後重試'}},350)});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!cityModal.hidden)closeManager()});
+
+try{const savedCity=localStorage.getItem('meteo-city');if(myCityOrder.includes(savedCity))city=savedCity}catch(e){}
+if(!myCityOrder.includes(city))city=myCityOrder[0];
+rebuildCityMenu();updateCityLabels();setMode('auto');
 setInterval(()=>{if(mode==='auto'&&!document.hidden)fetchLatest()},600000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&mode==='auto')fetchLatest()});
 // Cloudflare preview: do not register the legacy Netlify service worker.
