@@ -37,6 +37,23 @@ async function jma(c,signal){
   const hi=validNumber(area.tempsMax?.[i]),lo=validNumber(area.tempsMin?.[i]);
   if(hi!==null||lo!==null)days.set(dayKey(time),{tempMax:hi,tempMin:lo});
  });
+ // JMA short-term forecast (timeSeries[0]) supplies temperatures missing from
+ // the weekly series, typically today and tomorrow. Keep forecast dates aligned.
+ const shortSeries=x?.[0]?.timeSeries?.find(series=>series.areas?.some(a=>Array.isArray(a.tempsMax)||Array.isArray(a.tempsMin)));
+ if(shortSeries){
+  const shortArea=shortSeries.areas.find(a=>a.area?.name===c.jmaName)||shortSeries.areas.find(a=>a.area?.name?.includes(c.jmaName))||shortSeries.areas[0];
+  if(shortArea){
+   shortSeries.timeDefines.forEach((time,i)=>{
+    const date=dayKey(time);
+    const hi=validNumber(shortArea.tempsMax?.[i]),lo=validNumber(shortArea.tempsMin?.[i]);
+    if(hi===null&&lo===null)return;
+    const existing=days.get(date)||{tempMax:null,tempMin:null};
+    if(existing.tempMax===null&&hi!==null)existing.tempMax=hi;
+    if(existing.tempMin===null&&lo!==null)existing.tempMin=lo;
+    days.set(date,existing);
+   });
+  }
+ }
  return days;
 }
 // JMA forecast offices, keyed by prefecture name from geocoding (not AMeDAS station IDs).
