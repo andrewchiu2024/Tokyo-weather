@@ -107,35 +107,60 @@ async function directCwaDiagnostic(env){
  for(const sample of samples){
   const u=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/'+sample.path);
   u.searchParams.set('Authorization',key);
+  const out={label:sample.label};
   try{
-   const r=await fetch(u.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
-   const contentType=r.headers.get('content-type')||'';
-   const result={label:sample.label,httpStatus:r.status,contentType:contentType.split(';')[0]};
-   if(r.status>=300&&r.status<400){result.responseType='redirect';results.push(result);continue;}
-   if(contentType.includes('json')){
+   let r=await fetch(u.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
+   out.initialStatus=r.status;
+   out.initialContentType=(r.headers.get('content-type')||'').split(';')[0];
+   if(r.status>=300&&r.status<400){
+    const loc=r.headers.get('location');
+    out.hasLocation=Boolean(loc);
+    if(!loc){out.outcome='redirect-without-location';results.push(out);continue;}
+    let target;
+    try{target=new URL(loc,u);}catch{out.outcome='invalid-location';results.push(out);continue;}
+    out.redirectHost=target.hostname;
+    out.redirectProtocol=target.protocol.replace(':','');
+    // Never send our API key to a redirect target. Do not follow HTTP or URLs with credentials.
+    if(target.protocol!=='https:'||target.username||target.password){out.outcome='unsafe-redirect';results.push(out);continue;}
+    // Restrict redirect destinations to CWA domains or known cloud object storage.
+    const h=target.hostname.toLowerCase();
+    const allowed=h==='opendata.cwa.gov.tw'||h.endsWith('.cwa.gov.tw')||h.endsWith('.amazonaws.com')||h.endsWith('.cloudfront.net')||h==='storage.googleapis.com'||h.endsWith('.storage.googleapis.com');
+    if(!allowed){out.outcome='redirect-host-not-allowlisted';results.push(out);continue;}
+    // Redirect URL may contain a signed storage token; never output URL or query string.
+    r=await fetch(target.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
+   }
+   out.finalStatus=r.status;
+   out.finalContentType=(r.headers.get('content-type')||'').split(';')[0];
+   if(r.status>=300&&r.status<400){
+    out.outcome='additional-redirect';
+    const loc2=r.headers.get('location');
+    if(loc2){try{out.nextRedirectHost=new URL(loc2,u).hostname;}catch{}}
+   }else if(!r.ok){out.outcome='http-error';}
+   else{
+    const body=await r.text();
+    out.bodyBytes=body.length;
     try{
-     const json=await r.json();
-     result.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
-     result.datasetKeys=json?.dataset&&typeof json.dataset==='object'?Object.keys(json.dataset).slice(0,10):[];
+     const json=JSON.parse(body);
+     out.outcome='json';
+     out.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
      const stations=cwaStations(json);
-     result.taipeiStationCount=stations.length;
-     result.firstTaipeiSample=stations.length?{
+     out.taipeiStationCount=stations.length;
+     out.firstTaipeiSample=stations.length?{
       stationId:String(stations[0].StationId??stations[0].StationID??''),
       observedAt:stations[0].ObsTime?.DateTime??stations[0].DateTime??null,
       airTemperature:stations[0].WeatherElement?.AirTemperature??stations[0].AirTemperature??null
      }:null;
-     result.hasCwaError=Boolean(json?.error||json?.message||json?.dataset?.success==='false');
-    }catch{result.responseType='invalid-json';}
-   }else{result.responseType='non-json';}
-   results.push(result);
-  }catch(e){results.push({label:sample.label,requestFailed:true,errorType:e?.name||'Error'});}
+    }catch{out.outcome='not-json';}
+   }
+  }catch(e){out.outcome='fetch-failed';out.errorType=e?.name||'Error';}
+  results.push(out);
  }
- return {diagnostic:'cwa-direct-getData',results};
+ return {diagnostic:'cwa-direct-redirect',results};
 }
 
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='direct'){
+ if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='redirect'){
   try{return new Response(JSON.stringify(await directCwaDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
   catch{return new Response(JSON.stringify({error:'CWA direct diagnostic failed'}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
