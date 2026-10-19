@@ -172,8 +172,40 @@ async function directCwaDiagnostic(env){
  return {diagnostic:'cwa-direct-format',results};
 }
 
+
+// Inspect the XML structure of a known CWA hourly archive without exposing URLs or credentials.
+async function cwaXmlStructureDiagnostic(env){
+ const key=env?.CWA_API_KEY;if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
+ const u=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/2026/10/18/14/00/00');
+ u.searchParams.set('Authorization',key);
+ let r=await fetch(u.toString(),{redirect:'manual'});
+ if(r.status>=300&&r.status<400){
+  const location=r.headers.get('location');if(!location)throw Error('CWA redirect missing');
+  const target=new URL(location,u),host=target.hostname.toLowerCase();
+  if(target.protocol!=='https:'||target.username||target.password||!(host==='opendata.cwa.gov.tw'||host.endsWith('.amazonaws.com')))throw Error('Unexpected redirect host');
+  r=await fetch(target.toString(),{redirect:'manual'});
+ }
+ if(!r.ok)throw Error('CWA file HTTP '+r.status);
+ const xml=await r.text();
+ const names=[...xml.matchAll(/<\/?([A-Za-z_][\w:.-]*)\b/g)].map(m=>m[1]);
+ const counts={};for(const name of names)counts[name]=(counts[name]||0)+1;
+ const match=xml.match(/466920/);
+ let stationContext=null;
+ if(match){
+  const pos=match.index;
+  // Only tag names near the station, never raw XML or URLs.
+  stationContext={offset:pos,nearbyTags:[...xml.slice(Math.max(0,pos-500),Math.min(xml.length,pos+1400)).matchAll(/<\/?([A-Za-z_][\w:.-]*)\b/g)].map(x=>x[1]).slice(0,90)};
+ }
+ const observationTags=Object.keys(counts).filter(n=>/station|time|temp|weather|location|obs|data|value|element|id/i.test(n));
+ return {diagnostic:'cwa-xml-structure',httpStatus:r.status,xmlBytes:xml.length,rootTag:names[0]||null,hasStation466920:!!match,stationOccurrences:(xml.match(/466920/g)||[]).length,observationTags:observationTags.slice(0,65),stationContext};
+}
+
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
+ if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='xml'){
+  try{return new Response(JSON.stringify(await cwaXmlStructureDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
+  catch(e){return new Response(JSON.stringify({error:String(e.message).replace(/Authorization=[^&\s]+/gi,'Authorization=[redacted]')}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
+ }
  if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='format'){
   try{return new Response(JSON.stringify(await directCwaDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
   catch{return new Response(JSON.stringify({error:'CWA direct diagnostic failed'}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
