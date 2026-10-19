@@ -705,7 +705,8 @@ function showCondition(condition){
 }
 async function loadCondition(forCity,forRequest){
  try{
-  const response=await fetch('/api/weather-condition?city='+encodeURIComponent(forCity),{cache:'no-store'});
+  const conditionUrl=isJapaneseCustom(forCity)?'/api/weather-condition?lat='+encodeURIComponent(CITIES[forCity].lat)+'&lon='+encodeURIComponent(CITIES[forCity].lon):'/api/weather-condition?city='+encodeURIComponent(forCity);
+  const response=await fetch(conditionUrl,{cache:'no-store'});
   const data=await response.json();
   if(forCity!==city||forRequest!==requestId||mode!=='auto')return;
   if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
@@ -891,7 +892,7 @@ async function fetchLatest(){
  requestInFlight=true;$('refresh').disabled=true;
  const currentId=++requestId,currentCity=city,controller=new AbortController();activeController=controller;
  setStatus('正在更新'+cityInfo().name+'氣象資料…','loading');
- if(!isCustomCity(currentCity))loadCondition(currentCity,currentId);
+ if(!isCustomCity(currentCity)||isJapaneseCustom(currentCity))loadCondition(currentCity,currentId);
  try{
    const timer=setTimeout(()=>controller.abort(),14000);
    let response;
