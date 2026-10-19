@@ -122,7 +122,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .source-disclosure .source-content{font-size:11px;line-height:1.85;color:#aac1d1;padding:0 2px 14px}
 .source-disclosure .source-content p{margin:0}
 /* My Cities v2.0 */
-.city-manager-open{display:flex;width:100%;align-items:center;justify-content:center;margin:7px 0 0;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700;min-height:48px}.city-manager-open:focus-visible{outline:2px solid #85d8e5;outline-offset:2px}
+.city-manager-open{display:block;width:100%;margin:-3px 0 16px;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700}
 .city-modal[hidden]{display:none!important}.city-modal{position:fixed;inset:0;z-index:100;background:rgba(5,14,24,.82);display:flex;align-items:center;justify-content:center;padding:16px}
 .city-dialog{width:min(100%,520px);max-height:90dvh;overflow:auto;background:#192f43;border:1px solid #54778b;border-radius:20px;padding:20px;box-shadow:0 15px 55px #0008}
 .city-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.city-dialog h2{margin:0;font-size:20px}
@@ -159,6 +159,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <button type="button" class="city-option" role="option" data-city="singapore" aria-selected="false">新加坡 · Singapore <span class="city-check" aria-hidden="true">✓</span></button>
   </div>
 </details>
+<button type="button" class="city-manager-open" id="openCityManager">＋ 搜尋／新增／管理城市</button>
 <div class="city-modal" id="cityModal" hidden>
   <div class="city-dialog" role="dialog" aria-modal="true" aria-labelledby="cityDialogTitle">
     <div class="city-dialog-head"><h2 id="cityDialogTitle">我的城市</h2><button type="button" id="closeCityManager" aria-label="關閉">✕</button></div>
@@ -921,7 +922,6 @@ function rebuildCityMenu(){
   const check=document.createElement('span');check.className='city-check';check.setAttribute('aria-hidden','true');check.textContent='✓';b.append(check);
   b.addEventListener('click',()=>{switchCity(key);syncCityMenu();$('cityPicker').open=false});menu.append(b);
  }
- const manage=document.createElement('button');manage.type='button';manage.className='city-manager-open';manage.id='openCityManager';manage.textContent='＋ 新增／管理城市';manage.addEventListener('click',openManager);menu.append(manage);
  cityOptions=[...menu.querySelectorAll('.city-option')];syncCityMenu();
 }
 // Native <details> controls opening on iPhone without JavaScript.
@@ -948,7 +948,7 @@ const cityModal=$('cityModal'),citySearch=$('citySearch'),cityResults=$('citySea
 let searchTimer=null,searchController=null,searchSequence=0;
 function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();citySearch.focus() }
 function closeManager(){cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
-$('closeCityManager').onclick=closeManager;
+$('openCityManager').onclick=openManager;$('closeCityManager').onclick=closeManager;
 cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
 function renderManagedCities(){
  const root=$('managedCities');root.replaceChildren();
@@ -1007,7 +1007,62 @@ function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder
 function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
 function addCity(item){const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);closeManager()}
 function renderSearchResults(results){cityResults.replaceChildren();if(!results.length){cityResults.textContent='找不到符合的城市，請嘗試英文或當地名稱。';return}for(const item of results){if(!Number.isFinite(Number(item.latitude))||!Number.isFinite(Number(item.longitude))||!item.id)continue;const key=cityMatch(item)||'geo-'+item.id,row=document.createElement('div');row.className='city-result';const label=document.createElement('span');label.className='city-result-name';label.textContent=item.name;const sub=document.createElement('small');sub.textContent=[item.admin1,item.country].filter(Boolean).join(' · ');label.append(sub);const button=document.createElement('button');button.textContent=myCityOrder.includes(key)?'已加入':'＋ 加入';button.disabled=myCityOrder.includes(key);button.onclick=()=>addCity(item);row.append(label,button);cityResults.append(row)}}
-citySearch.addEventListener('input',()=>{clearTimeout(searchTimer);searchController?.abort();const q=citySearch.value.trim(),seq=++searchSequence;cityResults.replaceChildren();if(q.length<2){cityResults.textContent='請輸入至少兩個字元';return}cityResults.textContent='搜尋中…';searchTimer=setTimeout(async()=>{const controller=new AbortController();searchController=controller;try{const r=await fetch('https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(q)+'&count=10&language=zh&format=json',{signal:controller.signal});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(seq===searchSequence)renderSearchResults(data.results||[])}catch(e){if(!controller.signal.aborted&&seq===searchSequence)cityResults.textContent='搜尋暫不可用，請稍後重試'}},350)});
+// Traditional-Chinese aliases supplement Open-Meteo's incomplete translated place-name index.
+// The country code avoids confusing cities with identical English names.
+const CITY_ZH_ALIASES={
+ '奧斯陸':['Oslo','NO'],'哥本哈根':['Copenhagen','DK'],'斯德哥爾摩':['Stockholm','SE'],
+ '赫爾辛基':['Helsinki','FI'],'雷克雅維克':['Reykjavik','IS'],'卑爾根':['Bergen','NO'],
+ '慕尼黑':['Munich','DE'],'柏林':['Berlin','DE'],'漢堡':['Hamburg','DE'],
+ '維也納':['Vienna','AT'],'布拉格':['Prague','CZ'],'華沙':['Warsaw','PL'],
+ '布達佩斯':['Budapest','HU'],'蘇黎世':['Zurich','CH'],'日內瓦':['Geneva','CH'],
+ '布魯塞爾':['Brussels','BE'],'阿姆斯特丹':['Amsterdam','NL'],'鹿特丹':['Rotterdam','NL'],
+ '里斯本':['Lisbon','PT'],'馬德里':['Madrid','ES'],'巴塞隆納':['Barcelona','ES'],
+ '羅馬':['Rome','IT'],'米蘭':['Milan','IT'],'佛羅倫斯':['Florence','IT'],
+ '雅典':['Athens','GR'],'伊斯坦堡':['Istanbul','TR'],'倫敦':['London','GB'],
+ '愛丁堡':['Edinburgh','GB'],'都柏林':['Dublin','IE'],'巴黎':['Paris','FR'],
+ '紐約':['New York','US'],'洛杉磯':['Los Angeles','US'],'舊金山':['San Francisco','US'],
+ '芝加哥':['Chicago','US'],'華盛頓':['Washington','US'],'波士頓':['Boston','US'],
+ '溫哥華':['Vancouver','CA'],'多倫多':['Toronto','CA'],'蒙特婁':['Montreal','CA'],
+ '雪梨':['Sydney','AU'],'墨爾本':['Melbourne','AU'],'奧克蘭':['Auckland','NZ'],
+ '東京':['Tokyo','JP'],'大阪':['Osaka','JP'],'京都':['Kyoto','JP'],'札幌':['Sapporo','JP'],
+ '台北':['Taipei','TW'],'臺北':['Taipei','TW'],'首爾':['Seoul','KR'],
+ '釜山':['Busan','KR'],'新加坡':['Singapore','SG'],'曼谷':['Bangkok','TH'],
+ '河內':['Hanoi','VN'],'胡志明市':['Ho Chi Minh City','VN'],
+ '吉隆坡':['Kuala Lumpur','MY'],'雅加達':['Jakarta','ID'],
+ '上海':['Shanghai','CN'],'北京':['Beijing','CN'],'香港':['Hong Kong','HK'],
+ '杜拜':['Dubai','AE'],'開羅':['Cairo','EG'],'開普敦':['Cape Town','ZA'],
+ '聖保羅':['São Paulo','BR'],'布宜諾斯艾利斯':['Buenos Aires','AR']
+};
+const cityAliasEntry=q=>Object.entries(CITY_ZH_ALIASES).find(([zh])=>zh===q)?.[1];
+async function geocodeCities(query,language,signal){
+ const url='https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(query)+'&count=20&language='+language+'&format=json';
+ const response=await fetch(url,{signal});if(!response.ok)throw Error('HTTP '+response.status);
+ return (await response.json()).results||[];
+}
+citySearch.addEventListener('input',()=>{
+ clearTimeout(searchTimer);searchController?.abort();
+ const q=citySearch.value.trim(),seq=++searchSequence;cityResults.replaceChildren();
+ if(q.length<2){cityResults.textContent='請輸入至少兩個字元';return}
+ cityResults.textContent='搜尋中…';
+ searchTimer=setTimeout(async()=>{
+  const controller=new AbortController();searchController=controller;
+  try{
+   const alias=cityAliasEntry(q);
+   // For a known Traditional-Chinese name, query the stable English name directly.
+   // Otherwise try the original Chinese query first, with an English fallback.
+   let results=await geocodeCities(alias?alias[0]:q,alias?'en':'zh',controller.signal);
+   if(alias){
+    results=results.filter(item=>item.country_code===alias[1]&&item.name?.toLocaleLowerCase()===alias[0].toLocaleLowerCase());
+    results=results.map(item=>({...item,name:q}));
+   }else if(!results.length&&/[\u3400-\u9fff]/u.test(q)){
+    // Open-Meteo sometimes indexes simplified Chinese but not traditional.
+    // Known variants are handled above; unknown names retain the normal no-result message.
+    results=await geocodeCities(q,'en',controller.signal);
+   }
+   if(seq===searchSequence&&!controller.signal.aborted)renderSearchResults(results.slice(0,10));
+  }catch(e){if(!controller.signal.aborted&&seq===searchSequence)cityResults.textContent='搜尋暫不可用，請稍後重試'}
+ },350);
+});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!cityModal.hidden)closeManager()});
 
 try{const savedCity=localStorage.getItem('meteo-city');if(myCityOrder.includes(savedCity))city=savedCity}catch(e){}
