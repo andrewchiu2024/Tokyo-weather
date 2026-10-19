@@ -19,7 +19,7 @@ export async function onRequest({request}){
   const byTime=new Map();
   for(const result of results){if(result.status!=='fulfilled')continue;
    for(const [key,val] of Object.entries(result.value)){
-    if(!/^\d{12}$/.test(key))continue;
+    if(!/^\d{12}(?:\d{2})?$/.test(key))continue;
     const v=val?.temp?.[0];if(typeof v!=='number'||!Number.isFinite(v)||v< -60||v>60)continue;
     const t=Date.UTC(+key.slice(0,4),+key.slice(4,6)-1,+key.slice(6,8),+key.slice(8,10)-9,+key.slice(10,12));
     if(t>=start.getTime()&&t<=end.getTime())byTime.set(t,{time:new Date(t).toISOString(),temp:v});
