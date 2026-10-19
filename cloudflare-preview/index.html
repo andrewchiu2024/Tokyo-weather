@@ -383,9 +383,9 @@ function renderForecast(data,stale=false){
    const x=xAt(i),hi=series[0].values[i],lo=series[1].values[i];
    if(Number.isFinite(hi)&&Number.isFinite(lo)){
     const upper=yAt(Math.max(hi,lo)),lower=yAt(Math.min(hi,lo));
-    svg.append(svgEl('rect',{x:x-9,y:upper,width:18,height:Math.max(2,lower-upper),rx:9,fill:'url(#temperature-range-gradient)'}));
-    svg.append(svgEl('circle',{cx:x,cy:yAt(hi),r:5.5,fill:'#f5b46c',stroke:'#203a50','stroke-width':1.2}));
-    svg.append(svgEl('circle',{cx:x,cy:yAt(lo),r:5.5,fill:'#77baff',stroke:'#203a50','stroke-width':1.2}));
+    // Slim continuous gradient bar; rounded ends inherit the exact temperature color.
+    // No separately colored endpoint circles, which previously looked disconnected.
+    svg.append(svgEl('rect',{x:x-6,y:upper,width:12,height:Math.max(2,lower-upper),rx:6,fill:'url(#temperature-range-gradient)'}));
    }
    for(const [v,isHigh,color] of [[hi,true,'#f5b46c'],[lo,false,'#77baff']]){
     if(!Number.isFinite(v))continue;
