@@ -232,7 +232,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 
 <section class="hourly-panel" aria-label="過去24小時氣溫觀測" id="historyPanel">
   <div class="hourly-title">過去 24 小時氣溫變化</div>
-  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C</p>
+  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每小時實測 · °C</p>
   <div id="historyChart"></div><div id="historyDetail" class="hourly-detail"></div>
   <div id="historyStatus" class="hourly-status">正在讀取測站歷史資料…</div>
 </section>
@@ -291,7 +291,7 @@ async function loadHistory(force=false){
  if(!CITIES[forCity].isJMA&&!CITIES[forCity].isCWA){panel.hidden=true;return;}
  panel.hidden=false;
  const isTaipei=Boolean(CITIES[forCity].isCWA);
- $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C';
+ $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每小時實測 · °C';
  const cached=historyCache.get(forCity);
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
  $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
@@ -303,7 +303,23 @@ async function loadHistory(force=false){
  }catch(e){if(city===forCity&&id===historyRequest){$('historyChart').replaceChildren();$('historyDetail').textContent='';$('historyStatus').textContent='⚠ '+(isTaipei?'CWA 臺北':'JMA')+' 歷史觀測暫不可用：'+e.message;}}
 }
 function renderHistory(data){
- const points=data.points,root=$('historyChart');root.replaceChildren();
+ // Keep the original JMA 10-minute measurements untouched; show one actual
+ // station reading per hour (prefer the exact hour, otherwise the nearest reading).
+ // Taipei already supplies hourly observations and is not resampled.
+ const rawPoints=data.points;
+ const points=CITIES[city].isJMA&&Array.isArray(rawPoints)?(()=>{
+  const hours=new Map();
+  for(const p of rawPoints){
+   const ms=Date.parse(p.time);
+   if(!Number.isFinite(ms)||!Number.isFinite(p.temp))continue;
+   const hour=Math.floor(ms/3600000);
+   const distance=ms-hour*3600000;
+   const previous=hours.get(hour);
+   if(!previous||distance<previous.distance)hours.set(hour,{point:p,distance});
+  }
+  return [...hours.entries()].sort((a,b)=>a[0]-b[0]).slice(-24).map(([,v])=>v.point);
+ })():rawPoints;
+ const root=$('historyChart');root.replaceChildren();
  if(!points?.length)return;
  const ns='http://www.w3.org/2000/svg';
  const el=(tag,a={})=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(a))n.setAttribute(k,String(v));return n};
@@ -314,9 +330,9 @@ function renderHistory(data){
  const ts=points.map(p=>Date.parse(p.time)),start=ts[0],span=Math.max(1,ts[ts.length-1]-start);
  const x=i=>left+(ts[i]-start)/span*(right-left);
  for(let i=0;i<=4;i++){const v=min+(max-min)*i/4,yy=y(v);svg.append(el('line',{x1:left,y1:yy,x2:right,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5','stroke-width':'.8'}));const t=el('text',{x:left-6,y:yy+3,'text-anchor':'end',fill:'#afc9da','font-size':10});t.textContent=Math.round(v)+'°';svg.append(t)}
- // Break the curve where the station has no readings for more than 20 minutes.
+ // Break the hourly display curve if there is a gap longer than 90 minutes.
  let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#73c5d9','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
- points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>(data.resolutionMinutes===60?90:20)*60000)flush();segment.push([x(i),y(p.temp)])});flush();
+ points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>90*60000)flush();segment.push([x(i),y(p.temp)])});flush();
  const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
  for(let i=0;i<5;i++){const idx=Math.round((points.length-1)*i/4),t=el('text',{x:x(idx),y:193,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#b7cedd','font-size':10});t.textContent=fmt(points[idx].time);svg.append(t)}
  const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1});const dot=el('circle',{r:4.5,fill:'#73c5d9',stroke:'#203a50','stroke-width':2});svg.append(cursor,dot);
