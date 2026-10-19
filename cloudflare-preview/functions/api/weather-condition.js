@@ -83,10 +83,12 @@ async function openMeteo(c,signal){
 }
 const handler=async(event,eventEnv)=>{
  const city=event.queryStringParameters?.city;
- if(!Object.prototype.hasOwnProperty.call(CITIES,city))return {statusCode:400,headers,body:JSON.stringify({error:'不支援的城市'})};
+ const lat=Number(event.queryStringParameters?.lat),lon=Number(event.queryStringParameters?.lon);
+ const hasCoords=event.queryStringParameters?.lat!==undefined&&event.queryStringParameters?.lon!==undefined&&Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180;
+ if(!hasCoords&&!Object.prototype.hasOwnProperty.call(CITIES,city))return {statusCode:400,headers,body:JSON.stringify({error:'不支援的城市或座標'})};
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),11000);
  try{
-  const c=CITIES[city];const data=c.agency==='JMA'?await jma(c,controller.signal):c.agency==='CWA'?await cwa(controller.signal,eventEnv):await openMeteo(c,controller.signal);
+  const c=hasCoords?{lat,lon}:CITIES[city];const data=hasCoords?await openMeteo(c,controller.signal):c.agency==='JMA'?await jma(c,controller.signal):c.agency==='CWA'?await cwa(controller.signal,eventEnv):await openMeteo(c,controller.signal);
   return {statusCode:200,headers,body:JSON.stringify({city,...data})};
  }catch(e){return {statusCode:502,headers:{...headers,'Cache-Control':'no-store'},body:JSON.stringify({error:'天氣概況暫時無法取得：'+e.message})};}
  finally{clearTimeout(timer)}

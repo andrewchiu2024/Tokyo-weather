@@ -301,7 +301,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   </section>
   <div id="forecastStatus" class="status loading" role="status" aria-live="polite">尚未載入預報</div>
   <div id="forecastDays"></div>
-  <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
+  <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他非日本城市使用 Open-Meteo；新增日本城市也會優先匹配 JMA 週間預報，無法可靠匹配或官方資料不足時使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
   <button type="button" id="forecastRefresh" class="mini">↻ 更新七天預報</button>
 </section>
 <details class="source-disclosure" id="footerSource">
@@ -329,14 +329,16 @@ try{
  if(saved&&Array.isArray(saved.order)&&saved.order.length){
   for(const item of saved.custom||[]){
    if(item&&/^geo-\d+$/.test(item.id)&&typeof item.name==='string'&&item.name.length<120&&Number.isFinite(item.lat)&&Number.isFinite(item.lon)&&Math.abs(item.lat)<=90&&Math.abs(item.lon)<=180&&typeof item.zone==='string'){
-    CITIES[item.id]={name:item.name,zone:item.zone,lat:item.lat,lon:item.lon,country:item.country||'',isCustom:true};
+    CITIES[item.id]={name:item.name,zone:item.zone,lat:item.lat,lon:item.lon,country:item.country||'',countryCode:item.countryCode||'',admin1:item.admin1||'',isCustom:true};
    }
   }
   const keys=[...new Set(saved.order)].filter(k=>CITIES[k]);if(keys.length)myCityOrder=keys;
  }
 }catch(e){}
-function saveMyCities(){try{localStorage.setItem('meteo-my-cities-v2',JSON.stringify({order:myCityOrder,custom:Object.entries(CITIES).filter(([,v])=>v.isCustom).map(([id,v])=>({id,name:v.name,zone:v.zone,lat:v.lat,lon:v.lon,country:v.country}))}))}catch(e){}}
+function saveMyCities(){try{localStorage.setItem('meteo-my-cities-v2',JSON.stringify({order:myCityOrder,custom:Object.entries(CITIES).filter(([,v])=>v.isCustom).map(([id,v])=>({id,name:v.name,zone:v.zone,lat:v.lat,lon:v.lon,country:v.country,countryCode:v.countryCode,admin1:v.admin1||''}))}))}catch(e){}}
 function isCustomCity(key=city){return Boolean(CITIES[key]?.isCustom)}
+function isJapaneseCustom(key=city){const c=CITIES[key];return Boolean(c?.isCustom&&(c.zone==='Asia/Tokyo')&&(c.country==='Japan'||c.country==='日本'||c.countryCode==='JP'))}
+function isOfficialCity(key=city){return Boolean(CITIES[key]?.isJMA||CITIES[key]?.isCWA||CITIES[key]?.jmaStationId)}
 function cityCoords(key){const c=CITIES[key];return c?.isCustom?[c.lat,c.lon]:FORECAST_LOCATIONS[key]}
 
 // Open-Meteo forecast coordinates (city centers); all seven cities use the same model forecast source.
@@ -357,7 +359,7 @@ const historyCache=new Map();let historyRequest=0;
 async function loadHistory(force=false){
  const panel=$('historyPanel');if(!panel)return;
  const forCity=city,id=++historyRequest;
- if(!CITIES[forCity].isJMA&&!CITIES[forCity].isCWA){panel.hidden=true;return;}
+ if(!isOfficialCity(forCity)){panel.hidden=true;return;}
  panel.hidden=false;
  const isTaipei=Boolean(CITIES[forCity].isCWA);
  $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每小時實測 · °C';
@@ -365,7 +367,7 @@ async function loadHistory(force=false){
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
  $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
  try{
-  const r=await fetch('/api/observed-history?city='+encodeURIComponent(forCity));
+  const r=await fetch('/api/observed-history?city='+encodeURIComponent(forCity)+(CITIES[forCity].jmaStationId?'&station='+encodeURIComponent(CITIES[forCity].jmaStationId):''));
   const data=await r.json();if(!r.ok)throw Error(data.error||'資料無法取得');
   if(city!==forCity||id!==historyRequest)return;
   historyCache.set(forCity,{data,saved:Date.now()});renderHistory(data);
@@ -376,7 +378,7 @@ function renderHistory(data){
  // station reading per hour (prefer the exact hour, otherwise the nearest reading).
  // Taipei already supplies hourly observations and is not resampled.
  const rawPoints=data.points;
- const points=CITIES[city].isJMA&&Array.isArray(rawPoints)?(()=>{
+ const points=(CITIES[city].isJMA||CITIES[city].jmaStationId)&&Array.isArray(rawPoints)?(()=>{
   const hours=new Map();
   for(const p of rawPoints){
    const ms=Date.parse(p.time);
@@ -486,9 +488,12 @@ async function loadForecast(force=false){
  $('forecastStatus').textContent='正在取得'+CITIES[forCity].name+'七天預報…';$('forecastStatus').className='status loading';
  if(!cached)$('forecastDays').replaceChildren();
  try{
-  const response=await fetch(isCustomCity(forCity)?openMeteoDailyURL(forCity):'/api/seven-day-forecast?city='+encodeURIComponent(forCity),{signal:controller.signal,cache:'no-store'});
+  const jmaCustom=isJapaneseCustom(forCity);
+  const c=CITIES[forCity];
+  const url=jmaCustom?'/api/seven-day-forecast?'+new URLSearchParams({city:'custom',lat:String(c.lat),lon:String(c.lon),zone:c.zone,name:c.name,admin1:c.admin1||'',country:'JP'}).toString():isCustomCity(forCity)?openMeteoDailyURL(forCity):'/api/seven-day-forecast?city='+encodeURIComponent(forCity);
+  const response=await fetch(url,{signal:controller.signal,cache:'no-store'});
    const raw=await response.json();
-   const data=isCustomCity(forCity)?normalizeOpenMeteoDaily(raw):raw;
+   const data=isCustomCity(forCity)&&!jmaCustom?normalizeOpenMeteoDaily(raw):raw;
   if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
   if(!Array.isArray(data.days)||!data.days.length)throw new Error('預報資料不完整');
   if(city!==forCity||activePage!=='forecast'||controller.signal.aborted)return;
@@ -703,7 +708,8 @@ function showCondition(condition){
 }
 async function loadCondition(forCity,forRequest){
  try{
-  const response=await fetch('/api/weather-condition?city='+encodeURIComponent(forCity),{cache:'no-store'});
+  const conditionUrl=isJapaneseCustom(forCity)?'/api/weather-condition?lat='+encodeURIComponent(CITIES[forCity].lat)+'&lon='+encodeURIComponent(CITIES[forCity].lon):'/api/weather-condition?city='+encodeURIComponent(forCity);
+  const response=await fetch(conditionUrl,{cache:'no-store'});
   const data=await response.json();
   if(forCity!==city||forRequest!==requestId||mode!=='auto')return;
   if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
@@ -725,11 +731,11 @@ async function loadCondition(forCity,forRequest){
 }
 
 function cityInfo(){return CITIES[city]}
-function citySource(){return cityInfo().isJMA?'JMA · '+cityInfo().name:cityInfo().isCWA?'CWA · 臺北':'Open-Meteo · 模型'}
+function citySource(){return (cityInfo().isJMA||cityInfo().jmaStationId)?'JMA · '+cityInfo().name:cityInfo().isCWA?'CWA · 臺北':'Open-Meteo · 模型'}
 function updateCityLabels(){
- const c=cityInfo(),j=c.isJMA,o=j||c.isCWA;
+ const c=cityInfo(),j=c.isJMA||Boolean(c.jmaStationId),o=j||c.isCWA;
  $('pageTitle').textContent='即時氣象觀測';
- $('stationSubtitle').textContent=o?c.subtitle:'Open-Meteo · 近期氣象模型資料（非測站實測）';
+ $('stationSubtitle').textContent=o?(c.subtitle||'日本氣象廳 AMeDAS · '+c.jmaStationName+'觀測站 '+c.jmaStationId):'Open-Meteo · 近期氣象模型資料（非測站實測）';
  $('sourceTag').textContent=mode==='manual'?'手動模擬':citySource();
  $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取'+c.name+' AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':c.isCWA?'每 10 分鐘嘗試讀取中央氣象署臺北站官方觀測資料；實際時間以 CWA 回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
  $('sourceDetail').textContent=j?'來源：JMA '+c.name+'站':c.isCWA?'來源：CWA 臺北站':'來源：Open-Meteo 模型';
@@ -744,7 +750,7 @@ function clearObservation(){
 }
 function switchCity(next){
  if(!CITIES[next]||next===city)return;
- city=next;lastObs=null;requestId++;if(activeController)activeController.abort();activeController=null;requestInFlight=false;
+ city=next;syncCityMenu();lastObs=null;requestId++;if(activeController)activeController.abort();activeController=null;requestInFlight=false;
  $('refresh').disabled=false;
  try{localStorage.setItem('meteo-city',city)}catch(e){}
  updateCityLabels();
@@ -879,28 +885,30 @@ function applyObservation(obs){
  if(obs.weatherCondition)showCondition(obs.weatherCondition);
  updateWeatherStory(temp,rh,values.d,typeof obs.windSpeed==='number'?obs.windSpeed:NaN);
  const date=new Date(obs.observedAt),valid=Number.isFinite(date.getTime()),c=cityInfo();
- $('observedAt').textContent=((c.isJMA||c.isCWA)?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
+ $('observedAt').textContent=((c.isJMA||c.isCWA||c.jmaStationId)?'觀測時間：':'模型資料時間：')+(valid?new Intl.DateTimeFormat('zh-TW',{timeZone:c.zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):'未知');
  const age=Date.now()-date.getTime();
- const stale=!valid||age>((c.isJMA||c.isCWA)?30:180)*60*1000||age< -65*60*1000;
- setStatus(stale?'⚠ 資料時間異常或已延遲':c.name+(c.isJMA?' AMeDAS · 已更新':c.isCWA?' CWA · 已更新':' · 模型資料已更新'),stale?'stale':'ok');
+ const stale=!valid||age>((c.isJMA||c.isCWA||c.jmaStationId)?30:180)*60*1000||age< -65*60*1000;
+ setStatus(stale?'⚠ 資料時間異常或已延遲':c.name+((c.isJMA||c.jmaStationId)?' AMeDAS · 已更新':c.isCWA?' CWA · 已更新':' · 模型資料已更新'),stale?'stale':'ok');
 }
 async function fetchLatest(){
  if(requestInFlight||mode!=='auto')return;
  requestInFlight=true;$('refresh').disabled=true;
  const currentId=++requestId,currentCity=city,controller=new AbortController();activeController=controller;
  setStatus('正在更新'+cityInfo().name+'氣象資料…','loading');
- if(!isCustomCity(currentCity))loadCondition(currentCity,currentId);
+ if(!isCustomCity(currentCity)||isJapaneseCustom(currentCity))loadCondition(currentCity,currentId);
  try{
    const timer=setTimeout(()=>controller.abort(),14000);
    let response;
-   try{response=await fetch(isCustomCity(currentCity)?openMeteoCurrentURL(currentCity):currentCity==='tokyo'? '/api/tokyo-weather':currentCity==='sapporo'? '/api/sapporo-weather':'/api/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal})}
+   try{response=await fetch(isJapaneseCustom(currentCity)?'/api/jma-nearest-weather?lat='+encodeURIComponent(CITIES[currentCity].lat)+'&lon='+encodeURIComponent(CITIES[currentCity].lon):isCustomCity(currentCity)?openMeteoCurrentURL(currentCity):currentCity==='tokyo'? '/api/tokyo-weather':currentCity==='sapporo'? '/api/sapporo-weather':'/api/city-weather?city='+encodeURIComponent(currentCity),{cache:'no-store',signal:controller.signal});if(isJapaneseCustom(currentCity)&&!response.ok){response=await fetch(openMeteoCurrentURL(currentCity),{cache:'no-store',signal:controller.signal});CITIES[currentCity].jmaStationId=null;CITIES[currentCity].jmaStationName=null;CITIES[currentCity].subtitle='';updateCityLabels();}}
    finally{clearTimeout(timer)}
    const raw=await response.json();
-   const data=isCustomCity(currentCity)?normalizeOpenMeteoCurrent(raw):raw;
+   const officialCustom=isJapaneseCustom(currentCity)&&Boolean(raw.stationId);
+   const data=isCustomCity(currentCity)&&!officialCustom?normalizeOpenMeteoCurrent(raw):raw;
    if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
    if(!Number.isFinite(data.temperature)||!Number.isFinite(data.humidity)||data.humidity<1||data.humidity>100||!data.observedAt||!Number.isFinite(new Date(data.observedAt).getTime()))throw new Error('氣象資料格式不完整');
    if(currentId!==requestId||currentCity!==city||mode!=='auto')return;
-   lastObs=data;applyObservation(data);if(isCustomCity(currentCity)){const c=openMeteoCondition(data.weatherCode);const item={...c,sourceLabel:'Open-Meteo 天氣模型'};lastObs.weatherCondition=item;showCondition(item)}
+   if(officialCustom){const c=CITIES[currentCity];c.jmaStationId=raw.stationId;c.jmaStationName=raw.station;c.subtitle='日本氣象廳 AMeDAS · '+raw.station+'觀測站 '+raw.stationId+'（距市中心約 '+raw.distanceKm+' km）';updateCityLabels();}
+   lastObs=data;applyObservation(data);if(officialCustom&&activePage==='observations'){loadHistory();}if(isCustomCity(currentCity)&&!officialCustom){const c=openMeteoCondition(data.weatherCode);const item={...c,sourceLabel:'Open-Meteo 天氣模型'};lastObs.weatherCondition=item;showCondition(item)}
  }catch(e){
    if(currentId===requestId&&mode==='auto'){
      if(lastObs){applyObservation(lastObs);setStatus('⚠ 無法更新，顯示上次取得的資料','error')}
@@ -978,7 +986,7 @@ function syncCityModalViewport(){
 }
 window.visualViewport?.addEventListener('resize',syncCityModalViewport);
 window.visualViewport?.addEventListener('scroll',syncCityModalViewport);
-function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();syncCityModalViewport();citySearch.focus() }
+function openManager(){ $('cityPicker').open=false;clearTimeout(searchTimer);searchController?.abort();searchController=null;++searchSequence;citySearch.value='';cityResults.replaceChildren();cityResults.scrollTop=0;cityModal.hidden=false;renderManagedCities();syncCityModalViewport();citySearch.focus() }
 function closeManager(){citySearch.blur();cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
 $('closeCityManager').onclick=closeManager;
 cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
@@ -1037,7 +1045,7 @@ function clearCityDrag(){
 function moveCity(i,d){const j=i+d;if(j<0||j>=myCityOrder.length)return;[myCityOrder[i],myCityOrder[j]]=[myCityOrder[j],myCityOrder[i]];saveMyCities();rebuildCityMenu();renderManagedCities()}
 function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder.filter(k=>k!==key);if(key===city)switchCity(myCityOrder[0]);if(CITIES[key]?.isCustom){delete CITIES[key];delete FORECAST_LOCATIONS[key];forecastCache.delete(key);hourlyCache.delete(key);conditionCache.delete(key)}saveMyCities();rebuildCityMenu();renderManagedCities()}
 function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
-function addCity(item){citySearch.blur();const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);closeManager()}
+function addCity(item){citySearch.blur();const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',countryCode:item.countryCode||'',admin1:item.admin1||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);syncCityMenu();closeManager()}
 function renderSearchResults(results){cityResults.replaceChildren();if(!results.length){cityResults.textContent='找不到符合的城市，請嘗試英文或當地名稱。';return}for(const item of results){if(!Number.isFinite(Number(item.latitude))||!Number.isFinite(Number(item.longitude))||!item.id)continue;const key=cityMatch(item)||'geo-'+item.id,row=document.createElement('div');row.className='city-result';const label=document.createElement('span');label.className='city-result-name';label.textContent=item.name;const sub=document.createElement('small');sub.textContent=[item.admin1,item.country].filter(Boolean).join(' · ');label.append(sub);const button=document.createElement('button');button.textContent=myCityOrder.includes(key)?'已加入':'＋ 加入';button.disabled=myCityOrder.includes(key);button.onclick=()=>addCity(item);row.append(label,button);cityResults.append(row)}}
 // Traditional-Chinese city names are not consistently indexed by Open-Meteo.
 // Resolve common translated names to their native/English names, and merge
