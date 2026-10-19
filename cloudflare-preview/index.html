@@ -96,6 +96,10 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .trend-legend{display:flex;flex-wrap:wrap;gap:14px;margin:0 4px 10px;font-size:12px;color:#c4d8e6}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
 .trend-detail{background:#172f43;border:1px solid #436176;border-radius:15px;padding:14px 15px;margin:0 0 15px}.trend-detail-title{font-weight:750;margin-bottom:7px}.trend-detail-values{font-size:14px;line-height:1.9}.trend-detail-source{font-size:11px;color:#a9c5d7;line-height:1.7;margin-top:5px}
 .trend-tip{font-size:11px;color:#a9c5d7;margin:0 4px 8px}
+/* Hourly temperature forecast */
+.hourly-panel{background:#203a50;border:1px solid #3e5b70;border-radius:19px;padding:17px 13px 12px;margin-bottom:16px}
+.hourly-title{font-size:16px;font-weight:750;margin:0 4px 4px}.hourly-subtitle{font-size:11px;color:#a9c5d7;margin:0 4px 12px}
+.hourly-chart{width:100%;height:auto;display:block;touch-action:pan-y}.hourly-detail{margin:8px 4px 2px;font-size:13px;color:#e5f3fc;min-height:22px}.hourly-status{font-size:11px;color:#b7cedd;margin:5px 4px 0}
 </style>
 </head>
 <body>
@@ -215,6 +219,13 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 <section class="page-panel" id="forecastPage" role="tabpanel" aria-labelledby="forecastTab" hidden>
   <div class="forecast-heading" id="forecastHeading">未來七天天氣預報</div>
   <p class="forecast-note" id="forecastExplanation">以互動曲線圖顯示七天最高與最低氣溫；點選日期可查看預測濕度。左右滑動切換分頁。</p>
+  <section class="hourly-panel" aria-label="未來24小時氣溫預測">
+    <div class="hourly-title">未來 24 小時氣溫變化</div>
+    <p class="hourly-subtitle">每小時預測氣溫 · °C · Open-Meteo 模型</p>
+    <div id="hourlyChart" aria-live="polite"><p class="hourly-status">切換至預報頁面後載入…</p></div>
+    <div id="hourlyDetail" class="hourly-detail"></div>
+    <div id="hourlyStatus" class="hourly-status"></div>
+  </section>
   <div id="forecastStatus" class="status loading" role="status" aria-live="polite">尚未載入預報</div>
   <div id="forecastDays"></div>
   <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
@@ -244,7 +255,68 @@ function setPage(page){
  $('observationsPage').hidden=forecast;$('forecastPage').hidden=!forecast;
  $('observationsTab').classList.toggle('active',!forecast);$('forecastTab').classList.toggle('active',forecast);
  $('observationsTab').setAttribute('aria-selected',String(!forecast));$('forecastTab').setAttribute('aria-selected',String(forecast));
- if(forecast)loadForecast();
+ if(forecast){loadForecast();loadHourly();}
+}
+// The hourly curve is a forecast, separate from the official live observation.
+const hourlyCache=new Map();
+let hourlyController=null,hourlyRequest=0;
+async function loadHourly(force=false){
+ if(activePage!=='forecast')return;
+ const forCity=city,request=++hourlyRequest;
+ const cached=hourlyCache.get(forCity);
+ if(cached&&!force&&Date.now()-cached.saved<30*60*1000){renderHourly(cached.data);return;}
+ if(hourlyController)hourlyController.abort();
+ const controller=new AbortController();hourlyController=controller;
+ $('hourlyStatus').textContent='正在取得逐小時氣溫預報…';
+ if(!cached){$('hourlyChart').replaceChildren();$('hourlyDetail').textContent='';}
+ try{
+  const [lat,lon]=FORECAST_LOCATIONS[forCity];
+  const url='https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&hourly=temperature_2m&forecast_hours=24&timezone=auto';
+  const response=await fetch(url,{signal:controller.signal,cache:'no-store'});
+  if(!response.ok)throw new Error('HTTP '+response.status);
+  const data=await response.json();
+  const times=data.hourly?.time,temps=data.hourly?.temperature_2m;
+  if(!Array.isArray(times)||!Array.isArray(temps)||times.length<2||times.length!==temps.length)throw new Error('逐小時預報資料不完整');
+  if(controller.signal.aborted||city!==forCity||activePage!=='forecast'||request!==hourlyRequest)return;
+  const points=times.slice(0,24).map((time,i)=>({time,temp:Number(temps[i])})).filter(p=>Number.isFinite(p.temp));
+  if(points.length<2)throw new Error('有效氣溫不足');
+  hourlyCache.set(forCity,{data:points,saved:Date.now()});renderHourly(points);
+ }catch(e){
+  if(controller.signal.aborted||city!==forCity||request!==hourlyRequest)return;
+  if(cached){renderHourly(cached.data);$('hourlyStatus').textContent='⚠ 更新失敗，顯示上次預報';}
+  else{$('hourlyStatus').textContent='⚠ 無法取得逐小時預報：'+e.message;}
+ }
+}
+function renderHourly(points){
+ const root=$('hourlyChart');root.replaceChildren();
+ const ns='http://www.w3.org/2000/svg';
+ const el=(tag,attrs={})=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,String(v));return node;};
+ const svg=el('svg',{viewBox:'0 0 360 216',class:'hourly-chart',role:'img','aria-label':'未來24小時逐小時氣溫曲線，可點選時間查看氣溫'});
+ const left=35,right=342,top=24,bottom=168;
+ const values=points.map(p=>p.temp),min=Math.floor(Math.min(...values)-2),max=Math.ceil(Math.max(...values)+2);
+ const y=v=>bottom-(v-min)/Math.max(1,max-min)*(bottom-top);
+ const x=i=>left+i*(right-left)/(points.length-1);
+ for(let i=0;i<=4;i++){
+  const v=min+(max-min)*i/4,yy=y(v);
+  svg.append(el('line',{x1:left,y1:yy,x2:right,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5','stroke-width':'.8'}));
+  const txt=el('text',{x:left-6,y:yy+3,'text-anchor':'end',fill:'#afc9da','font-size':10});txt.textContent=Math.round(v)+'°';svg.append(txt);
+ }
+ const pts=points.map((p,i)=>[x(i),y(p.temp)]);
+ svg.append(el('polygon',{points:[[left,bottom],...pts,[right,bottom]].map(a=>a.join(',')).join(' '),fill:'#f5b46c','fill-opacity':'.11'}));
+ svg.append(el('polyline',{points:pts.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#f5b46c','stroke-width':3,'stroke-linejoin':'round','stroke-linecap':'round'}));
+ const ticks=[0,6,12,18,points.length-1].filter((v,i,a)=>v<points.length&&a.indexOf(v)===i);
+ ticks.forEach(i=>{const label=el('text',{x:x(i),y:193,'text-anchor':i===0?'start':i===points.length-1?'end':'middle',fill:'#b7cedd','font-size':10});label.textContent=points[i].time.slice(11,16);svg.append(label)});
+ const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1.2,'pointer-events':'none'});
+ const dot=el('circle',{cx:left,cy:y(points[0].temp),r:5,fill:'#f5b46c',stroke:'#203a50','stroke-width':2,'pointer-events':'none'});
+ svg.append(cursor,dot);
+ const select=i=>{
+  const p=points[i];cursor.setAttribute('x1',x(i));cursor.setAttribute('x2',x(i));dot.setAttribute('cx',x(i));dot.setAttribute('cy',y(p.temp));
+  $('hourlyDetail').textContent=p.time.slice(5,10).replace('-','/')+' '+p.time.slice(11,16)+'　預測 '+p.temp.toFixed(1)+'°C';
+ };
+ const pick=event=>{const r=svg.getBoundingClientRect();if(!r.width)return;const relative=(event.clientX-r.left)/r.width*360;select(Math.max(0,Math.min(points.length-1,Math.round((relative-left)/(right-left)*(points.length-1)))))};
+ svg.addEventListener('pointerdown',pick);svg.addEventListener('pointermove',e=>{if(e.buttons)pick(e)});
+ root.append(svg);select(0);
+ $('hourlyStatus').textContent='Open-Meteo 逐小時模型預測，非測站即時觀測 · 點選曲線查看數值';
 }
 function formatForecastDate(dateString,zone){
  const date=new Date(dateString+'T12:00:00Z');
@@ -349,7 +421,7 @@ function renderForecast(data,stale=false){
 }
 $('observationsTab').addEventListener('click',()=>setPage('observations'));
 $('forecastTab').addEventListener('click',()=>setPage('forecast'));
-$('forecastRefresh').addEventListener('click',()=>loadForecast(true));
+$('forecastRefresh').addEventListener('click',()=>{loadForecast(true);loadHourly(true)});
 let swipeStart=null;
 document.querySelector('main').addEventListener('touchstart',event=>{
  const target=event.target;
@@ -371,6 +443,7 @@ document.querySelector('main').addEventListener('touchend',event=>{
 // Individual SVG elements carry their own stroke colors; no external assets required.
 const WEATHER_ICONS={
  sun:'<circle cx="24" cy="24" r="8" stroke="#e5b13f"/><path d="M24 4v6M24 38v6M4 24h6M38 24h6M9.9 9.9l4.3 4.3M33.8 33.8l4.3 4.3M38.1 9.9l-4.3 4.3M14.2 33.8l-4.3 4.3" stroke="#e5b13f"/>',
+ moonCloud:'<path d="M15 8a10 10 0 0 0 10 13 10 10 0 0 1-10-13Z" stroke="#d5d7e8"/><path d="M18 37h18a7 7 0 0 0 0-14 11 11 0 0 0-18-4 9 9 0 0 0 0 18Z" stroke="#b6bdc4"/>',
  moon:'<path d="M38 33A17 17 0 0 1 16 10 18 18 0 1 0 38 33Z" stroke="#d8d7a0"/>',
  cloud:'<path d="M14 35h22a8 8 0 0 0 0-16c-1.5-6.5-10.5-9-15.4-4.4A11 11 0 0 0 14 35Z" stroke="#b6bdc4"/>',
  partly:'<path d="M16 6v4M5 17h4M8.5 9.5l3 3M25 9.5l-3 3" stroke="#e5b13f"/><circle cx="16" cy="17" r="7" stroke="#e5b13f"/><path d="M18 35h18a7 7 0 0 0 0-14c-1.5-5.5-9-7.6-13.1-3.8A9 9 0 0 0 18 35Z" stroke="#e5b13f"/>',
@@ -389,13 +462,55 @@ try{
   if(CITIES[key]&&item&&Date.now()-item.savedAt<30*60*1000&&item.data?.icon&&WEATHER_ICONS[item.data.icon])conditionCache.set(key,item);
  }
 }catch(e){}
+// Use each city's actual sunrise and sunset from Open-Meteo's daily solar times.
+// Solar times affect the icon only; the weather condition and official source stay unchanged.
+const solarCache=new Map();
+const solarPending=new Set();
+let currentIconKind=null;
+function localHour(forCity){
+ return Number(new Intl.DateTimeFormat('en-GB',{timeZone:CITIES[forCity].zone,hour:'2-digit',hourCycle:'h23'}).format(new Date()));
+}
+function isNight(forCity){
+ const item=solarCache.get(forCity),now=Date.now();
+ if(item&&now>=item.sunrise-86400000&&now<=item.sunset+86400000){
+  // The response includes two days so the appropriate sunrise/sunset is selected.
+  const day=item.days.find(d=>now>=d.sunrise&&now<d.nextSunrise);
+  if(day)return now>=day.sunset;
+  const prior=item.days.find(d=>now>=d.sunset&&now<d.nextSunrise);
+  if(prior)return true;
+  if(now<item.days[0].sunrise)return true;
+ }
+ // Approximate fallback only while solar times are loading or unavailable.
+ const hour=localHour(forCity);return hour<6||hour>=18;
+}
+async function loadSolarTimes(forCity){
+ const old=solarCache.get(forCity);
+ if((old&&Date.now()-old.saved<6*3600000)||solarPending.has(forCity))return;
+ const coords=FORECAST_LOCATIONS[forCity];if(!coords)return;
+ solarPending.add(forCity);
+ try{
+  const url='https://api.open-meteo.com/v1/forecast?latitude='+coords[0]+'&longitude='+coords[1]+'&daily=sunrise,sunset&forecast_days=3&timezone=auto&timeformat=unixtime';
+  const response=await fetch(url,{cache:'no-store'});
+  if(!response.ok)throw new Error('solar HTTP '+response.status);
+  const daily=(await response.json()).daily;
+  const rises=daily?.sunrise,sunsets=daily?.sunset;
+  if(!Array.isArray(rises)||!Array.isArray(sunsets)||rises.length<2)throw new Error('solar times missing');
+  const days=rises.slice(0,-1).map((r,i)=>({sunrise:r*1000,sunset:sunsets[i]*1000,nextSunrise:rises[i+1]*1000}));
+  solarCache.set(forCity,{days,saved:Date.now(),sunrise:days[0].sunrise,sunset:days[days.length-1].sunset});
+  if(city===forCity&&currentIconKind)drawConditionIcon(currentIconKind);
+ }catch(e){/* Keep an approximate clock-based icon when solar data is unavailable. */}
+ finally{solarPending.delete(forCity)}
+}
 function drawConditionIcon(kind){
+ currentIconKind=kind;
  const el=$('weatherSymbol');
  if(!kind||!WEATHER_ICONS[kind]||kind==='unknown'){
   el.innerHTML='';el.classList.add('is-empty');return;
  }
- el.innerHTML='<svg viewBox="0 0 48 48" aria-hidden="true">'+WEATHER_ICONS[kind]+'</svg>';
+ const icon=(isNight(city)?(kind==='sun'?'moon':kind==='partly'?'moonCloud':kind):kind);
+ el.innerHTML='<svg viewBox="0 0 48 48" aria-hidden="true">'+WEATHER_ICONS[icon]+'</svg>';
  el.classList.remove('is-empty');
+ if(kind==='sun'||kind==='partly')loadSolarTimes(city);
 }
 function clearCondition(simulated=false){
  if(!simulated){
@@ -465,7 +580,7 @@ function switchCity(next){
  $('refresh').disabled=false;
  try{localStorage.setItem('meteo-city',city)}catch(e){}
  updateCityLabels();
- if(activePage==='forecast')loadForecast(true);
+ if(activePage==='forecast'){loadForecast(true);loadHourly();}
  if(mode==='manual')setMode('auto');else{clearObservation();fetchLatest()}
 }
 
