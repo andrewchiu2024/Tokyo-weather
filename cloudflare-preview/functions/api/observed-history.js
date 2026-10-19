@@ -8,16 +8,12 @@ function cwaTime(value){
  const v=/(?:Z|[+-]\d\d:\d\d)$/.test(value)?value:value+'+08:00';
  return Date.parse(v);
 }
-function metadataEntries(obj, depth=0){
- if(depth>9||!obj||typeof obj!=='object')return [];
- if(Array.isArray(obj))return obj.flatMap(x=>metadataEntries(x,depth+1));
- const direct=Object.entries(obj).filter(([k,v])=>typeof v==='string'&&/^(url|downloadurl|download_url|fileurl|file_url)$/i.test(k)&&/^https:\/\//.test(v));
- if(direct.length)return [obj];
- return Object.values(obj).flatMap(x=>metadataEntries(x,depth+1));
+function metadataEntries(metadata){
+ const times=metadata?.dataset?.result?.resources?.resource?.data?.time;
+ return Array.isArray(times)?times:times&&typeof times==='object'?[times]:[];
 }
 function downloadUrl(entry){
- const key=Object.keys(entry).find(k=>/^(url|downloadurl|download_url|fileurl|file_url)$/i.test(k)&&/^https:\/\//.test(entry[k]));
- return key?entry[key]:null;
+ return typeof entry?.ProductURL==='string'?entry.ProductURL:null;
 }
 function cwaStations(data){
  const result=[];
@@ -29,43 +25,27 @@ function cwaStations(data){
  }
  walk(data);return result;
 }
-// Safe metadata diagnostics: structural keys only, never authorization tokens or download URLs.
-function metadataShape(value, depth=0){
- if(depth>3)return '[depth limit]';
- if(Array.isArray(value))return {type:'array',length:value.length,first:value.length?metadataShape(value[0],depth+1):null};
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,16).map(([k,v])=>[k,metadataShape(v,depth+1)]));
- return typeof value;
-}
-async function taipeiMetadataDiagnostic(env){
- const key=env?.CWA_API_KEY;
- if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
- const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'5'}).toString();
- const response=await fetch(url,{headers:{Accept:'application/json'}});
- const contentType=response.headers.get('content-type')||'';
- const raw=await response.text();
- let payload;
- try{payload=JSON.parse(raw);}catch{payload=null;}
- return {httpStatus:response.status,contentType:contentType.split(';')[0],json:payload!==null,
-  shape:payload===null?null:metadataShape(payload),
-  note:'僅顯示資料結構與欄位類型，不回傳金鑰、網址或原始資料'};
-}
 async function taipeiHistory(env){
  const key=env?.CWA_API_KEY;
  if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
  const end=Date.now(),start=end-24*3600000;
  const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'72'}).toString();
+ // CWA history metadata is an ascending hourly archive; request the relevant local time window.
+ const localTime=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(t)).replace(' ','T');
+ url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'48',timeFrom:localTime(start-2*3600000),timeTo:localTime(end)}).toString();
  const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
  if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
  const metadata=await metaRes.json();
+ if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
  const entries=metadataEntries(metadata);
- if(!entries.length)throw Error('CWA 歷史 API 未提供可辨識的檔案下載連結');
- const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(0,30);
- // Metadata is expected to list recent hourly files; never substitute model values.
+ if(!entries.length)throw Error('CWA 指定時間範圍內沒有歷史檔案');
+ const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-30);
+ if(!unique.length)throw Error('CWA 歷史檔案沒有 ProductURL');
  const settled=await Promise.allSettled(unique.map(async fileUrl=>{
   const u=new URL(fileUrl);
-  if(u.protocol!=='https:'||!(u.hostname==='opendata.cwa.gov.tw'||u.hostname.endsWith('.cwa.gov.tw')))throw Error('非 CWA 官方下載網址');
+  if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))throw Error('非預期的 CWA 官方下載網址');
+  // Metadata ProductURL can include authorization; replace with the current secret.
+  u.searchParams.set('Authorization',key);
   const r=await fetch(u.toString(),{headers:{Accept:'application/json'}});
   if(!r.ok)throw Error('CWA 歷史檔案 HTTP '+r.status);
   return r.json();
@@ -82,16 +62,12 @@ async function taipeiHistory(env){
   }
  }
  const points=[...byTime.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
- if(points.length<12)throw Error(`CWA 臺北測站近 24 小時有效逐時觀測不足（${points.length} 筆；歷史檔案 ${entries.length} 筆）`);
+ if(points.length<12)throw Error(`CWA 臺北測站近 24 小時有效逐時觀測不足（${points.length} 筆；歷史檔案 ${entries.length} 筆；下載成功 ${settled.filter(x=>x.status==='fulfilled').length} 筆）`);
  return {city:'taipei',station:'466920',source:'CWA official hourly station observations',resolutionMinutes:60,points,observedThrough:points.at(-1).time};
 }
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
  if(city==='taipei'){
-  if(new URL(request.url).searchParams.get('diagnostic')==='1'){
-   try{return new Response(JSON.stringify(await taipeiMetadataDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
-   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
-  }
   try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
