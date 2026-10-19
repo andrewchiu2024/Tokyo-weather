@@ -216,7 +216,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 
 <section class="hourly-panel" aria-label="過去24小時氣溫觀測" id="historyPanel">
   <div class="hourly-title">過去 24 小時氣溫變化</div>
-  <p class="hourly-subtitle">日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C</p>
+  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C</p>
   <div id="historyChart"></div><div id="historyDetail" class="hourly-detail"></div>
   <div id="historyStatus" class="hourly-status">正在讀取測站歷史資料…</div>
 </section>
@@ -237,7 +237,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
   <button type="button" id="forecastRefresh" class="mini">↻ 更新七天預報</button>
 </section>
-<p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
+<p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。東京、札幌及台北提供官方測站歷史氣溫趨勢。</p>
 </main>
 <script>
 // Tokyo Meteo original multicolor outline weather icons (2026-10-18)
@@ -273,20 +273,20 @@ async function loadHistory(force=false){
  panel.hidden=false;
  const cached=historyCache.get(forCity);
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
- $('historyStatus').textContent='正在取得 JMA AMeDAS 過去 24 小時實測…';
+ $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
  try{
   const r=await fetch('/api/observed-history?city='+encodeURIComponent(forCity));
   const data=await r.json();if(!r.ok)throw Error(data.error||'資料無法取得');
   if(city!==forCity||id!==historyRequest)return;
   historyCache.set(forCity,{data,saved:Date.now()});renderHistory(data);
- }catch(e){if(city===forCity&&id===historyRequest){$('historyChart').replaceChildren();$('historyDetail').textContent='';$('historyStatus').textContent='⚠ JMA 歷史觀測暫不可用：'+e.message;}}
+ }catch(e){if(city===forCity&&id===historyRequest){$('historyChart').replaceChildren();$('historyDetail').textContent='';$('historyStatus').textContent='⚠ '+(isTaipei?'CWA 臺北':'JMA')+' 歷史觀測暫不可用：'+e.message;}}
 }
 function renderHistory(data){
  const points=data.points,root=$('historyChart');root.replaceChildren();
  if(!points?.length)return;
  const ns='http://www.w3.org/2000/svg';
  const el=(tag,a={})=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(a))n.setAttribute(k,String(v));return n};
- const svg=el('svg',{viewBox:'0 0 360 216',class:'hourly-chart',role:'img','aria-label':'過去24小時 JMA 測站實測氣溫'});
+ const svg=el('svg',{viewBox:'0 0 360 216',class:'hourly-chart',role:'img','aria-label':'過去24小時測站實測氣溫'});
  const left=35,right=342,top=24,bottom=168;
  const values=points.map(p=>p.temp),min=Math.floor(Math.min(...values)-2),max=Math.ceil(Math.max(...values)+2);
  const y=v=>bottom-(v-min)/Math.max(1,max-min)*(bottom-top);
@@ -296,13 +296,13 @@ function renderHistory(data){
  // Break the curve where the station has no readings for more than 20 minutes.
  let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#73c5d9','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
  points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>20*60000)flush();segment.push([x(i),y(p.temp)])});flush();
- const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
+ const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
  for(let i=0;i<5;i++){const idx=Math.round((points.length-1)*i/4),t=el('text',{x:x(idx),y:193,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#b7cedd','font-size':10});t.textContent=fmt(points[idx].time);svg.append(t)}
  const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1});const dot=el('circle',{r:4.5,fill:'#73c5d9',stroke:'#203a50','stroke-width':2});svg.append(cursor,dot);
- const select=i=>{const p=points[i];cursor.setAttribute('x1',x(i));cursor.setAttribute('x2',x(i));dot.setAttribute('cx',x(i));dot.setAttribute('cy',y(p.temp));$('historyDetail').textContent=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Tokyo',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(p.time))+'　實測 '+p.temp.toFixed(1)+'°C'};
+ const select=i=>{const p=points[i];cursor.setAttribute('x1',x(i));cursor.setAttribute('x2',x(i));dot.setAttribute('cx',x(i));dot.setAttribute('cy',y(p.temp));$('historyDetail').textContent=new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(p.time))+'　實測 '+p.temp.toFixed(1)+'°C'};
  svg.addEventListener('pointerdown',e=>{const r=svg.getBoundingClientRect(),pos=(e.clientX-r.left)/r.width*360;let best=0;points.forEach((p,i)=>{if(Math.abs(x(i)-pos)<Math.abs(x(best)-pos))best=i});select(best)});
  root.append(svg);select(points.length-1);
- $('historyStatus').textContent='JMA AMeDAS '+data.station+' · '+points.length+' 筆實測 · 缺測區間不補值';
+ $('historyStatus').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站':'JMA AMeDAS')+' '+data.station+' · '+points.length+' 筆實測 · 缺測區間不補值';
 }
 // The hourly curve is a forecast, separate from the official live observation.
 const hourlyCache=new Map();
