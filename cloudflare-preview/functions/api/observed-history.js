@@ -30,18 +30,32 @@ async function taipeiHistory(env){
  if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
  const end=Date.now(),start=end-24*3600000;
  const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- // CWA history metadata is an ascending hourly archive; request the relevant local time window.
- const localTime=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(t)).replace(' ','T');
- url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'48',timeFrom:localTime(start-2*3600000),timeTo:localTime(end)}).toString();
- const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
- if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
- const metadata=await metaRes.json();
- if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
- const entries=metadataEntries(metadata);
- if(!entries.length)throw Error('CWA 指定時間範圍內沒有歷史檔案');
- const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-30);
+ // Query a wider window with explicit Taiwan offset. If CWA ignores/rejects
+ // the filter, retry unfiltered to distinguish API filtering from no archive.
+ const taipeiIso=t=>new Date(t+8*3600000).toISOString().slice(0,19)+'+08:00';
+ const windows=[
+  {Authorization:key,format:'JSON',limit:'72',timeFrom:taipeiIso(start-48*3600000),timeTo:taipeiIso(end)},
+  {Authorization:key,format:'JSON',limit:'72'}
+ ];
+ let entries=[],lastCount=0;
+ for(const params of windows){
+  url.search=new URLSearchParams(params).toString();
+  const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
+  if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
+  const metadata=await metaRes.json();
+  if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
+  const all=metadataEntries(metadata);
+  lastCount=all.length;
+  entries=all.filter(x=>Number.isFinite(cwaTime(x.DateTime))&&cwaTime(x.DateTime)>=start-48*3600000&&cwaTime(x.DateTime)<=end);
+  if(entries.length)break;
+ }
+ if(!entries.length)throw Error(`CWA 近 72 小時未找到可用歷史檔案（最後清單 ${lastCount} 筆）；可能是官方資料延遲或查詢篩選方式不符`);
+ entries.sort((a,b)=>cwaTime(a.DateTime)-cwaTime(b.DateTime));
+ const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-28);
  if(!unique.length)throw Error('CWA 歷史檔案沒有 ProductURL');
- const settled=await Promise.allSettled(unique.map(async fileUrl=>{
+ const settled=[];
+ for(let i=0;i<unique.length;i+=6){
+ const batch=await Promise.allSettled(unique.slice(i,i+6).map(async fileUrl=>{
   const u=new URL(fileUrl);
   if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))throw Error('非預期的 CWA 官方下載網址');
   // Metadata ProductURL can include authorization; replace with the current secret.
@@ -50,6 +64,8 @@ async function taipeiHistory(env){
   if(!r.ok)throw Error('CWA 歷史檔案 HTTP '+r.status);
   return r.json();
  }));
+ settled.push(...batch);
+ }
  const byTime=new Map();
  for(const item of settled){
   if(item.status!=='fulfilled')continue;
