@@ -361,31 +361,45 @@ function renderForecast(data,stale=false){
   const legend=create('div','trend-legend');
   for(const line of series){const item=create('span');const dot=create('span','legend-dot');dot.style.background=line.color;item.append(dot,document.createTextNode(line.label));legend.append(item)}
   panel.append(legend);
-  const svg=svgEl('svg',{viewBox:'0 0 360 224',class:'trend-chart',role:'img','aria-label':title+'，七天趨勢曲線圖'});
-  const top=26,bottom=172,plotH=bottom-top;
+  const svg=svgEl('svg',{viewBox:'0 0 360 255',class:'trend-chart',role:'img','aria-label':title+'，七天最高最低溫區間長條圖'});
+  const top=35,bottom=193,plotH=bottom-top;
   const yAt=v=>bottom-(v-minY)/(maxY-minY)*plotH;
+  // Fixed absolute-temperature color scale, independent of each day's high/low.
+  // userSpaceOnUse ensures identical temperatures receive identical colors on all bars.
+  const absoluteStops=[[-10,'#7488dc'],[0,'#6fa9e7'],[10,'#83c7cb'],[15,'#9ed5a1'],[20,'#e0d568'],[25,'#f4bd43'],[30,'#f49a30'],[35,'#ed6540'],[40,'#df4c43']];
+  const defs=svgEl('defs');
+  const gradient=svgEl('linearGradient',{id:'temperature-range-gradient',gradientUnits:'userSpaceOnUse',x1:0,y1:yAt(40),x2:0,y2:yAt(-10)});
+  for(const [temp,color] of absoluteStops){
+   const offset=((40-temp)/50*100).toFixed(2)+'%';
+   gradient.append(svgEl('stop',{offset,'stop-color':color}));
+  }
+  defs.append(gradient);svg.append(defs);
   for(let k=0;k<=4;k++){
    const val=minY+(maxY-minY)*k/4,y=yAt(val);
    svg.append(svgEl('line',{x1:38,y1:y,x2:332,y2:y,stroke:'#456177','stroke-width':'.7','stroke-dasharray':'3 5'}));
    const text=svgEl('text',{x:32,y:y+4,'text-anchor':'end',fill:'#a9c5d7','font-size':10});text.textContent=Math.round(val)+suffix;svg.append(text);
   }
-  // The temperature area between high and low gives a quick visual of the daily range.
-  if(series.length===2){
-   const upper=series[0].values.map((v,i)=>Number.isFinite(v)?[xAt(i),yAt(v)]:null);
-   const lower=series[1].values.map((v,i)=>Number.isFinite(v)?[xAt(i),yAt(v)]:null);
-   if(upper.every(Boolean)&&lower.every(Boolean)){
-    const pts=[...upper,...lower.reverse()];svg.append(svgEl('polygon',{points:pts.map(a=>a.join(',')).join(' '),fill:'#f5b46c','fill-opacity':'.10'}));
-   }
-  }
-  series.forEach(line=>{
-   let segment=[];const flush=()=>{if(segment.length>1)svg.append(svgEl('polyline',{points:segment.map(p=>p.join(',')).join(' '),fill:'none',stroke:line.color,'stroke-width':3,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
-   line.values.forEach((v,i)=>{if(Number.isFinite(v))segment.push([xAt(i),yAt(v)]);else flush()});flush();
-   line.values.forEach((v,i)=>{if(!Number.isFinite(v))return;svg.append(svgEl('circle',{cx:xAt(i),cy:yAt(v),r:4,fill:line.color,stroke:'#203a50','stroke-width':2}));});
-  });
-  const cursor=svgEl('line',{x1:xAt(selectedForecastDay),y1:top,x2:xAt(selectedForecastDay),y2:bottom,stroke:'#d5e9f3','stroke-width':1.2,'stroke-dasharray':'4 4','pointer-events':'none'});svg.append(cursor);
   days.forEach((day,i)=>{
-   const date=day.date.slice(5).replace('-','/');const txt=svgEl('text',{x:xAt(i),y:195,'text-anchor':'middle',fill:i===selectedForecastDay?'#ffffff':'#a9c5d7','font-size':11,'font-weight':i===selectedForecastDay?750:400});txt.textContent=date;svg.append(txt);
-   const hit=svgEl('rect',{x:xAt(i)-23,y:0,width:46,height:207,fill:'transparent',role:'button',tabindex:0,'aria-label':date+' 預報詳情'});
+   const x=xAt(i),hi=series[0].values[i],lo=series[1].values[i];
+   if(Number.isFinite(hi)&&Number.isFinite(lo)){
+    const upper=yAt(Math.max(hi,lo)),lower=yAt(Math.min(hi,lo));
+    svg.append(svgEl('rect',{x:x-9,y:upper,width:18,height:Math.max(2,lower-upper),rx:9,fill:'url(#temperature-range-gradient)'}));
+    svg.append(svgEl('circle',{cx:x,cy:yAt(hi),r:5.5,fill:'#f5b46c',stroke:'#203a50','stroke-width':1.2}));
+    svg.append(svgEl('circle',{cx:x,cy:yAt(lo),r:5.5,fill:'#77baff',stroke:'#203a50','stroke-width':1.2}));
+   }
+   for(const [v,isHigh,color] of [[hi,true,'#f5b46c'],[lo,false,'#77baff']]){
+    if(!Number.isFinite(v))continue;
+    const y=Math.max(13,Math.min(213,yAt(v)+(isHigh?-12:19)));
+    const label=svgEl('text',{x,y,'text-anchor':'middle',fill:color,'font-size':11,'font-weight':750,stroke:'#203a50','stroke-width':3,'stroke-linejoin':'round','paint-order':'stroke','pointer-events':'none'});
+    label.textContent=(Number.isInteger(v)?String(v):v.toFixed(1))+'°';svg.append(label);
+   }
+   const date=day.date.slice(5).replace('-','/');
+   const txt=svgEl('text',{x,y:239,'text-anchor':'middle',fill:i===selectedForecastDay?'#ffffff':'#a9c5d7','font-size':11,'font-weight':i===selectedForecastDay?750:400});txt.textContent=date;svg.append(txt);
+  });
+  const cursor=svgEl('line',{x1:xAt(selectedForecastDay),y1:top,x2:xAt(selectedForecastDay),y2:bottom,stroke:'#d5e9f3','stroke-width':1,'stroke-dasharray':'4 4','pointer-events':'none'});svg.append(cursor);
+  days.forEach((day,i)=>{
+   const date=day.date.slice(5).replace('-','/');
+   const hit=svgEl('rect',{x:xAt(i)-23,y:0,width:46,height:252,fill:'transparent',role:'button',tabindex:0,'aria-label':date+' 預報詳情'});
    hit.addEventListener('click',()=>selectDay(i));hit.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDay(i)}});svg.append(hit);
   });
   panel.append(svg);return panel;
@@ -397,14 +411,14 @@ function renderForecast(data,stale=false){
  root.append(chart('🌡️ 氣溫趨勢','每日最高與最低氣溫 · °C',[
   {label:'最高氣溫',color:'#f5b46c',values:highs},{label:'最低氣溫',color:'#77baff',values:lows}
  ],minTemp,maxTemp===minTemp?minTemp+5:maxTemp,'°'));
- root.append(create('p','trend-tip','點選曲線圖中的日期，查看當日數值與資料來源。'));
+ root.append(create('p','trend-tip','點選長條圖中的日期，查看當日數值與資料來源。'));
  const detail=create('section','trend-detail');root.append(detail);
  function selectDay(index){
   selectedForecastDay=index;
-  // Refresh selection cursor on the temperature chart without fetching the API again.
+  // Refresh selected date on the range-bar chart without fetching the API again.
   root.querySelectorAll('.trend-chart').forEach(svg=>{
    const line=svg.querySelector('line[pointer-events="none"]');if(line){line.setAttribute('x1',xAt(index));line.setAttribute('x2',xAt(index))}
-   svg.querySelectorAll('text').forEach(t=>{if(t.getAttribute('y')==='195'){const i=Math.round((Number(t.getAttribute('x'))-46)/46);t.setAttribute('fill',i===index?'#ffffff':'#a9c5d7');t.setAttribute('font-weight',i===index?'750':'400')}});
+   svg.querySelectorAll('text').forEach(t=>{if(t.getAttribute('y')==='239'){const i=Math.round((Number(t.getAttribute('x'))-46)/46);t.setAttribute('fill',i===index?'#ffffff':'#a9c5d7');t.setAttribute('font-weight',i===index?'750':'400')}});
   });
   const d=days[index];detail.replaceChildren();
   detail.append(create('div','trend-detail-title',formatForecastDate(d.date,CITIES[city].zone)+(index===0?' · 今天':'')));
