@@ -938,7 +938,7 @@ function rebuildCityMenu(){
   const check=document.createElement('span');check.className='city-check';check.setAttribute('aria-hidden','true');check.textContent='✓';b.append(check);
   b.addEventListener('click',()=>{switchCity(key);syncCityMenu();$('cityPicker').open=false});menu.append(b);
  }
- const manage=document.createElement('button');manage.type='button';manage.className='city-manager-open';manage.id='openCityManager';manage.textContent='＋ 新增／管理城市';manage.addEventListener('click',openManager);menu.append(manage);
+ const manage=document.createElement('button');manage.type='button';manage.className='city-manager-open';manage.id='openCityManager';manage.textContent='＋ 新增／管理城市';manage.addEventListener('click',openManager);menu.prepend(manage);
  cityOptions=[...menu.querySelectorAll('.city-option')];syncCityMenu();
 }
 // Native <details> controls opening on iPhone without JavaScript.
@@ -1049,7 +1049,19 @@ const CITY_SEARCH_ALIASES={
  '香港':'Hong Kong','澳門':'Macau','澳门':'Macau',
  '首爾':'Seoul','首尔':'Seoul','紐約':'New York','纽约':'New York',
  '巴黎':'Paris','東京':'Tokyo','东京':'Tokyo','札幌':'Sapporo',
- '台北':'Taipei','臺北':'Taipei','新加坡':'Singapore'
+ '台北':'Taipei','臺北':'Taipei','新加坡':'Singapore',
+ '青森':'Aomori','青森市':'Aomori','仙台':'Sendai','仙台市':'Sendai',
+ '大阪':'Osaka','大阪市':'Osaka','京都':'Kyoto','京都市':'Kyoto',
+ '橫濱':'Yokohama','横滨':'Yokohama','橫濱市':'Yokohama',
+ '名古屋':'Nagoya','名古屋市':'Nagoya','福岡':'Fukuoka','福冈':'Fukuoka',
+ '福岡市':'Fukuoka','廣島':'Hiroshima','广岛':'Hiroshima',
+ '廣島市':'Hiroshima','神戶':'Kobe','神户':'Kobe','神戶市':'Kobe',
+ '奈良':'Nara','奈良市':'Nara','金澤':'Kanazawa','金泽':'Kanazawa',
+ '長崎':'Nagasaki','长崎':'Nagasaki','熊本':'Kumamoto',
+ '鹿兒島':'Kagoshima','鹿儿岛':'Kagoshima','新潟':'Niigata',
+ '盛岡':'Morioka','盛冈':'Morioka','秋田':'Akita','山形':'Yamagata',
+ '福島':'Fukushima','福岛':'Fukushima','函館':'Hakodate','函馆':'Hakodate',
+ '旭川':'Asahikawa','小樽':'Otaru','那霸':'Naha','沖繩':'Okinawa' 
 };
 async function queryCityGeocoding(name,language,signal){
  const url='https://geocoding-api.open-meteo.com/v1/search?name='+encodeURIComponent(name)+'&count=20&language='+language+'&format=json';
@@ -1058,7 +1070,7 @@ async function queryCityGeocoding(name,language,signal){
 }
 function translatedCityName(item,query){
  const alias=CITY_SEARCH_ALIASES[query];
- return alias&&item.name?.toLocaleLowerCase('en')===alias.toLocaleLowerCase('en')?query:item.name;
+ return alias&&item.name?.toLocaleLowerCase('en')===alias.toLocaleLowerCase('en')?(alias==='Aomori'?'青森市':query):item.name;
 }
 citySearch.addEventListener('input',()=>{
  clearTimeout(searchTimer);searchController?.abort();
@@ -1073,6 +1085,10 @@ citySearch.addEventListener('input',()=>{
    const searches=[queryCityGeocoding(q,'zh',controller.signal)];
    if(alias&&alias.toLocaleLowerCase('en')!==q.toLocaleLowerCase('en'))searches.push(queryCityGeocoding(alias,'en',controller.signal));
    else searches.push(queryCityGeocoding(q,'en',controller.signal));
+   // Japanese municipality suffixes are often indexed when the shorter name is not.
+   if(/^[\u3400-\u9fff]{2,5}$/.test(q)&&!/[市區区町村縣县府都道]$/.test(q)){
+    searches.push(queryCityGeocoding(q+'市','zh',controller.signal));
+   }
    const settled=await Promise.allSettled(searches);
    if(controller.signal.aborted||seq!==searchSequence)return;
    const matches=new Map();
@@ -1083,7 +1099,14 @@ citySearch.addEventListener('input',()=>{
     }
    }
    if(!matches.size&&settled.every(r=>r.status==='rejected'))throw Error('城市搜尋服務暫不可用');
-   renderSearchResults([...matches.values()].slice(0,20));
+   const ranked=[...matches.values()];
+   // Prefer the Japanese municipality for Japanese-name aliases, not similarly named towns elsewhere.
+   const japaneseAlias=new Set(['Aomori','Sendai','Osaka','Kyoto','Yokohama','Nagoya','Fukuoka','Hiroshima','Kobe','Nara','Kanazawa','Nagasaki','Kumamoto','Kagoshima','Niigata','Morioka','Akita','Yamagata','Fukushima','Hakodate','Asahikawa','Otaru','Naha','Okinawa']);
+   if(alias&&japaneseAlias.has(alias))ranked.sort((a,b)=>{
+    const score=item=>(String(item.name||'').toLowerCase()===q.toLowerCase()?3:0)+(String(item.country_code||'').toUpperCase()==='JP'?5:0)+(String(item.feature_code||'')==='PPLA'?1:0);
+    return score(b)-score(a);
+   });
+   renderSearchResults(ranked.slice(0,20));
   }catch(e){
    if(!controller.signal.aborted&&seq===searchSequence)cityResults.textContent='搜尋暫不可用，請稍後重試';
   }
