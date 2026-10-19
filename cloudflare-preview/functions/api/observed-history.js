@@ -2,219 +2,71 @@
 const STATIONS={tokyo:'44132',sapporo:'14163'};
 const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'public, max-age=300, s-maxage=600'};
 function stampJst(date){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hourCycle:'h23'}).formatToParts(date);const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));return `${p.year}${p.month}${p.day}_${String(Math.floor(Number(p.hour)/3)*3).padStart(2,'0')}`;}
-// CWA short-term historical hourly station observations, Taipei station 466920.
+// CWA Taipei hourly history: download official XML archives directly (metadata is incomplete).
 function cwaTime(value){
  if(typeof value!=='string')return NaN;
- const v=/(?:Z|[+-]\d\d:\d\d)$/.test(value)?value:value+'+08:00';
- return Date.parse(v);
+ const v=value.trim().replace(' ','T');
+ return Date.parse(/(?:Z|[+-]\d\d:\d\d)$/.test(v)?v:v+'+08:00');
 }
-function metadataEntries(metadata){
- const times=metadata?.dataset?.result?.resources?.resource?.data?.time;
- return Array.isArray(times)?times:times&&typeof times==='object'?[times]:[];
+function xmlTag(xml,tag){
+ const m=xml.match(new RegExp('<(?:[\\w.-]+:)?'+tag+'\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?'+tag+'\\s*>','i'));
+ return m?m[1]:null;
 }
-function downloadUrl(entry){
- return typeof entry?.ProductURL==='string'?entry.ProductURL:null;
-}
-function cwaStations(data){
- const result=[];
- function walk(x,depth=0){
-  if(depth>12||!x||typeof x!=='object')return;
-  if(Array.isArray(x)){for(const v of x)walk(v,depth+1);return;}
-  if(String(x.StationId??x.StationID??x.stationId??'')==='466920')result.push(x);
-  else for(const [k,v] of Object.entries(x))if(typeof v==='object'&&v)walk(v,depth+1);
+function xmlText(xml){return String(xml??'').replace(/<[^>]*>/g,' ').replace(/&(?:amp|lt|gt|quot|apos);/g,' ').trim();}
+function taipeiFromXml(xml){
+ // Station elements contain the complete station observation, including ObsTime and WeatherElement.
+ const stations=[...xml.matchAll(/<(?:[\w.-]+:)?Station\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?Station\s*>/gi)].map(m=>m[0]);
+ for(const station of stations){
+  if(xmlText(xmlTag(station,'StationId'))!=='466920')continue;
+  const timeText=xmlText(xmlTag(xmlTag(station,'ObsTime')||station,'DateTime'));
+  const temperature=xmlText(xmlTag(xmlTag(station,'WeatherElement')||station,'AirTemperature'));
+  const temp=Number(temperature),time=cwaTime(timeText);
+  if(Number.isFinite(time)&&temperature!==''&&Number.isFinite(temp)&&temp>=-50&&temp<=60)
+   return {time:new Date(time).toISOString(),temp};
  }
- walk(data);return result;
+ return null;
+}
+async function fetchCwaXml(key,epoch){
+ const local=new Date(epoch+8*3600000).toISOString();
+ const path=[local.slice(0,4),local.slice(5,7),local.slice(8,10),local.slice(11,13),'00','00'].join('/');
+ const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/'+path);
+ url.searchParams.set('Authorization',key);
+ let r=await fetch(url.toString(),{redirect:'manual'});
+ if(r.status>=300&&r.status<400){
+  const loc=r.headers.get('location');if(!loc)throw Error('CWA redirect missing');
+  const target=new URL(loc,url),host=target.hostname.toLowerCase();
+  if(target.protocol!=='https:'||target.username||target.password||!(host==='opendata.cwa.gov.tw'||host==='cwaopendata.s3.ap-northeast-1.amazonaws.com'))throw Error('Unexpected CWA redirect host');
+  r=await fetch(target.toString(),{redirect:'manual'});
+ }
+ if(!r.ok)throw Error('CWA archive HTTP '+r.status);
+ const xml=await r.text();
+ if(!/^\s*<\?xml\b|^\s*<cwaopendata\b/i.test(xml))throw Error('CWA archive not XML');
+ return taipeiFromXml(xml);
 }
 async function taipeiHistory(env){
- const key=env?.CWA_API_KEY;
- if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
+ const key=env?.CWA_API_KEY;if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
  const end=Date.now(),start=end-24*3600000;
- const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- // CWA history metadata is an ascending hourly archive; request the relevant local time window.
- const localTime=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(t)).replace(' ','T');
- url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'48',timeFrom:localTime(start-2*3600000),timeTo:localTime(end)}).toString();
- const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
- if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
- const metadata=await metaRes.json();
- if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
- const entries=metadataEntries(metadata);
- if(!entries.length)throw Error('CWA 指定時間範圍內沒有歷史檔案');
- const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-30);
- if(!unique.length)throw Error('CWA 歷史檔案沒有 ProductURL');
- const settled=await Promise.allSettled(unique.map(async fileUrl=>{
-  const u=new URL(fileUrl);
-  if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))throw Error('非預期的 CWA 官方下載網址');
-  // Metadata ProductURL can include authorization; replace with the current secret.
-  u.searchParams.set('Authorization',key);
-  const r=await fetch(u.toString(),{headers:{Accept:'application/json'}});
-  if(!r.ok)throw Error('CWA 歷史檔案 HTTP '+r.status);
-  return r.json();
- }));
- const byTime=new Map();
- for(const item of settled){
-  if(item.status!=='fulfilled')continue;
-  for(const station of cwaStations(item.value)){
-   const time=cwaTime(station.ObsTime?.DateTime??station.DateTime);
-   const raw=station.WeatherElement?.AirTemperature??station.AirTemperature;
-   const temp=raw===null||raw===undefined||String(raw).trim()===''?NaN:Number(raw);
-   if(Number.isFinite(time)&&time>=start&&time<=end&&Number.isFinite(temp)&&temp>=-50&&temp<=60)
-    byTime.set(time,{time:new Date(time).toISOString(),temp});
+ // Archive paths use Taipei local hours. Include extra earlier hours for archive publishing delays.
+ const lastHour=Math.floor(end/3600000)*3600000;
+ const hours=Array.from({length:29},(_,i)=>lastHour-i*3600000);
+ const byTime=new Map();let succeeded=0,failed=0;
+ // Bounded concurrency avoids a 29-request burst against the CWA service.
+ for(let i=0;i<hours.length;i+=6){
+  const batch=await Promise.allSettled(hours.slice(i,i+6).map(h=>fetchCwaXml(key,h)));
+  for(const result of batch){
+   if(result.status!=='fulfilled'){failed++;continue;}
+   succeeded++;
+   const point=result.value;if(!point)continue;
+   const t=Date.parse(point.time);
+   if(t>=start&&t<=end)byTime.set(t,point);
   }
  }
  const points=[...byTime.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
- if(points.length<12)throw Error(`CWA 臺北測站近 24 小時有效逐時觀測不足（${points.length} 筆；歷史檔案 ${entries.length} 筆；下載成功 ${settled.filter(x=>x.status==='fulfilled').length} 筆）`);
+ if(points.length<8)throw Error(`CWA 臺北站近 24 小時有效逐時觀測不足（${points.length} 筆；檔案讀取成功 ${succeeded} 筆，失敗 ${failed} 筆）`);
  return {city:'taipei',station:'466920',source:'CWA official hourly station observations',resolutionMinutes:60,points,observedThrough:points.at(-1).time};
 }
-// Temporary CWA sample diagnostic. Does not expose Authorization or ProductURL.
-function safeShape(value, depth=0){
- if(depth>5)return '[depth limit]';
- if(Array.isArray(value))return {type:'array',length:value.length,first:value.length?safeShape(value[0],depth+1):null};
- if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,15).filter(([k])=>!/(authorization|producturl|token|secret|key|url)/i.test(k)).map(([k,v])=>[k,safeShape(v,depth+1)]));
- if(typeof value==='string')return value.length>70?value.slice(0,70)+'…':value;
- return value;
-}
-async function taipeiSampleDiagnostic(env){
- const key=env?.CWA_API_KEY;
- if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
- const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'3',offset:'0',timeFrom:'2026-10-18T12:00:00',timeTo:'2026-10-19T12:00:00'}).toString();
- const r=await fetch(url,{headers:{Accept:'application/json'}});
- if(!r.ok)return {stage:'metadata',httpStatus:r.status};
- const meta=await r.json(), entries=metadataEntries(meta);
- const out={stage:'metadata',httpStatus:r.status,success:meta?.dataset?.success??null,entryCount:entries.length,firstEntryTime:entries[0]?.DateTime??null};
- const fileUrl=entries.map(downloadUrl).find(Boolean);
- if(!fileUrl)return out;
- const u=new URL(fileUrl);
- if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))return {...out,fileStatus:'unexpected CWA URL'};
- u.searchParams.set('Authorization',key);
- const f=await fetch(u.toString(),{headers:{Accept:'application/json'}});
- out.fileHttpStatus=f.status;
- if(!f.ok)return out;
- try{out.fileShape=safeShape(await f.json());}catch{out.fileStatus='not JSON';}
- return out;
-}
-
-// Diagnostic only: directly request CWA hourly archives without getMetadata.
-// Never return URLs, authorization, or raw CWA responses to the browser.
-async function directCwaDiagnostic(env){
- const key=env?.CWA_API_KEY;
- if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
- const samples=[
-  {label:'known-archive-2026-10-18-14',path:'2026/10/18/14/00/00'},
-  {label:'known-archive-2026-10-18-15',path:'2026/10/18/15/00/00'}
- ];
- const results=[];
- for(const sample of samples){
-  const u=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/'+sample.path);
-  u.searchParams.set('Authorization',key);
-  const out={label:sample.label};
-  try{
-   let r=await fetch(u.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
-   out.initialStatus=r.status;
-   out.initialContentType=(r.headers.get('content-type')||'').split(';')[0];
-   if(r.status>=300&&r.status<400){
-    const loc=r.headers.get('location');
-    out.hasLocation=Boolean(loc);
-    if(!loc){out.outcome='redirect-without-location';results.push(out);continue;}
-    let target;
-    try{target=new URL(loc,u);}catch{out.outcome='invalid-location';results.push(out);continue;}
-    out.redirectHost=target.hostname;
-    out.redirectProtocol=target.protocol.replace(':','');
-    // Never send our API key to a redirect target. Do not follow HTTP or URLs with credentials.
-    if(target.protocol!=='https:'||target.username||target.password){out.outcome='unsafe-redirect';results.push(out);continue;}
-    // Restrict redirect destinations to CWA domains or known cloud object storage.
-    const h=target.hostname.toLowerCase();
-    const allowed=h==='opendata.cwa.gov.tw'||h.endsWith('.cwa.gov.tw')||h.endsWith('.amazonaws.com')||h.endsWith('.cloudfront.net')||h==='storage.googleapis.com'||h.endsWith('.storage.googleapis.com');
-    if(!allowed){out.outcome='redirect-host-not-allowlisted';results.push(out);continue;}
-    // Redirect URL may contain a signed storage token; never output URL or query string.
-    r=await fetch(target.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
-   }
-   out.finalStatus=r.status;
-   out.finalContentType=(r.headers.get('content-type')||'').split(';')[0];
-   if(r.status>=300&&r.status<400){
-    out.outcome='additional-redirect';
-    const loc2=r.headers.get('location');
-    if(loc2){try{out.nextRedirectHost=new URL(loc2,u).hostname;}catch{}}
-   }else if(!r.ok){out.outcome='http-error';}
-   else{
-    const bytes=new Uint8Array(await r.arrayBuffer());
-    out.bodyBytes=bytes.byteLength;
-    out.first16Hex=Array.from(bytes.slice(0,16),b=>b.toString(16).padStart(2,'0')).join(' ');
-    out.magic=bytes[0]===0x50&&bytes[1]===0x4b?'zip':bytes[0]===0x1f&&bytes[1]===0x8b?'gzip':bytes[0]===0x7b||bytes[0]===0x5b?'possibly-json':'other';
-    out.contentEncoding=r.headers.get('content-encoding')||null;
-    out.contentDispositionPresent=Boolean(r.headers.get('content-disposition'));
-    let decoded=null;
-    if(out.magic==='gzip'&&typeof DecompressionStream==='function'){
-     try{const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));decoded=await new Response(stream).text();out.gzipDecoded=true;}
-     catch{out.gzipDecoded=false;}
-    }else if(out.magic!=='zip'){
-     decoded=new TextDecoder('utf-8',{fatal:false}).decode(bytes);
-    }
-    if(decoded!==null){
-     out.textPrefix=decoded.slice(0,100).replace(/[\x00-\x1f]/g,' ');
-     try{
-      const json=JSON.parse(decoded);
-      out.outcome='json';
-      out.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
-      const stations=cwaStations(json);
-      out.taipeiStationCount=stations.length;
-      out.firstTaipeiSample=stations.length?{
-       stationId:String(stations[0].StationId??stations[0].StationID??''),
-       observedAt:stations[0].ObsTime?.DateTime??stations[0].DateTime??null,
-       airTemperature:stations[0].WeatherElement?.AirTemperature??stations[0].AirTemperature??null
-      }:null;
-     }catch{out.outcome='binary-or-non-json';}
-    }else out.outcome='compressed-archive';
-   }
-  }catch(e){out.outcome='fetch-failed';out.errorType=e?.name||'Error';}
-  results.push(out);
- }
- return {diagnostic:'cwa-direct-format',results};
-}
-
-
-// Inspect the XML structure of a known CWA hourly archive without exposing URLs or credentials.
-async function cwaXmlStructureDiagnostic(env){
- const key=env?.CWA_API_KEY;if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
- const u=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/2026/10/18/14/00/00');
- u.searchParams.set('Authorization',key);
- let r=await fetch(u.toString(),{redirect:'manual'});
- if(r.status>=300&&r.status<400){
-  const location=r.headers.get('location');if(!location)throw Error('CWA redirect missing');
-  const target=new URL(location,u),host=target.hostname.toLowerCase();
-  if(target.protocol!=='https:'||target.username||target.password||!(host==='opendata.cwa.gov.tw'||host.endsWith('.amazonaws.com')))throw Error('Unexpected redirect host');
-  r=await fetch(target.toString(),{redirect:'manual'});
- }
- if(!r.ok)throw Error('CWA file HTTP '+r.status);
- const xml=await r.text();
- const names=[...xml.matchAll(/<\/?([A-Za-z_][\w:.-]*)\b/g)].map(m=>m[1]);
- const counts={};for(const name of names)counts[name]=(counts[name]||0)+1;
- const match=xml.match(/466920/);
- let stationContext=null;
- if(match){
-  const pos=match.index;
-  // Only tag names near the station, never raw XML or URLs.
-  stationContext={offset:pos,nearbyTags:[...xml.slice(Math.max(0,pos-500),Math.min(xml.length,pos+1400)).matchAll(/<\/?([A-Za-z_][\w:.-]*)\b/g)].map(x=>x[1]).slice(0,90)};
- }
- const observationTags=Object.keys(counts).filter(n=>/station|time|temp|weather|location|obs|data|value|element|id/i.test(n));
- return {diagnostic:'cwa-xml-structure',httpStatus:r.status,xmlBytes:xml.length,rootTag:names[0]||null,hasStation466920:!!match,stationOccurrences:(xml.match(/466920/g)||[]).length,observationTags:observationTags.slice(0,65),stationContext};
-}
-
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='xml'){
-  try{return new Response(JSON.stringify(await cwaXmlStructureDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
-  catch(e){return new Response(JSON.stringify({error:String(e.message).replace(/Authorization=[^&\s]+/gi,'Authorization=[redacted]')}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
- }
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='format'){
-  try{return new Response(JSON.stringify(await directCwaDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
-  catch{return new Response(JSON.stringify({error:'CWA direct diagnostic failed'}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
- }
-
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='sample'){
-  try{return new Response(JSON.stringify(await taipeiSampleDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
-  catch(e){return new Response(JSON.stringify({error:'CWA sample diagnostic failed',detail:String(e.message).replace(/Authorization=[^&\s]+/gi,'Authorization=[redacted]')}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
- }
  if(city==='taipei'){
   try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
