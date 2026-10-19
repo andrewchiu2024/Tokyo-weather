@@ -93,56 +93,53 @@ async function taipeiSampleDiagnostic(env){
  try{out.fileShape=safeShape(await f.json());}catch{out.fileStatus='not JSON';}
  return out;
 }
-// Safe metadata comparison: fixed verified window versus rolling current window.
-// Never include Authorization, ProductURL, or raw upstream payload in diagnostics.
-async function taipeiMetadataDiagnostic(env){
+
+// Diagnostic only: directly request CWA hourly archives without getMetadata.
+// Never return URLs, authorization, or raw CWA responses to the browser.
+async function directCwaDiagnostic(env){
  const key=env?.CWA_API_KEY;
- if(!key)return {error:'Preview 環境缺少 CWA_API_KEY'};
- const now=Date.now();
- const localTime=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(t)).replace(' ','T');
- const tests=[
-  {name:'verified-window',from:'2026-10-18T12:00:00',to:'2026-10-19T12:00:00'},
-  {name:'rolling-window',from:localTime(now-26*3600000),to:localTime(now)}
+ if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
+ const samples=[
+  {label:'known-archive-2026-10-18-14',path:'2026/10/18/14/00/00'},
+  {label:'known-archive-2026-10-18-15',path:'2026/10/18/15/00/00'}
  ];
  const results=[];
- for(const test of tests){
+ for(const sample of samples){
+  const u=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getData/O-A0001-001/'+sample.path);
+  u.searchParams.set('Authorization',key);
   try{
-   const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
-   url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'48',offset:'0',timeFrom:test.from,timeTo:test.to}).toString();
-   const r=await fetch(url,{headers:{Accept:'application/json'},cache:'no-store'});
+   const r=await fetch(u.toString(),{headers:{Accept:'application/json'},redirect:'manual'});
    const contentType=r.headers.get('content-type')||'';
-   const raw=await r.text();
-   let meta;
-   try{meta=JSON.parse(raw);}catch{results.push({...test,httpStatus:r.status,contentType,isJson:false});continue;}
-   const entries=metadataEntries(meta);
-   const data=meta?.dataset?.result?.resources?.resource?.data;
-   const resource=meta?.dataset?.result?.resources?.resource;
-   results.push({...test,httpStatus:r.status,contentType,isJson:true,
-    success:meta?.dataset?.success??null,
-    topKeys:Object.keys(meta||{}).slice(0,12),
-    datasetKeys:Object.keys(meta?.dataset||{}).slice(0,12),
-    resultKeys:Object.keys(meta?.dataset?.result||{}).slice(0,12),
-    resourcesType:typeof meta?.dataset?.result?.resources,
-    resourceType:Array.isArray(resource)?'array':typeof resource,
-    resourceKeys:resource&&!Array.isArray(resource)&&typeof resource==='object'?Object.keys(resource).slice(0,12):[],
-    dataType:Array.isArray(data)?'array':typeof data,
-    dataKeys:data&&!Array.isArray(data)&&typeof data==='object'?Object.keys(data).slice(0,12):[],
-    timeType:Array.isArray(data?.time)?'array':typeof data?.time,
-    timeLength:Array.isArray(data?.time)?data.time.length:null,
-    parsedEntries:entries.length,
-    firstEntryTime:typeof entries[0]?.DateTime==='string'?entries[0].DateTime:null,
-    lastEntryTime:typeof entries.at(-1)?.DateTime==='string'?entries.at(-1).DateTime:null,
-    hasProductUrl:entries.some(x=>typeof x?.ProductURL==='string')
-   });
-  }catch(e){results.push({...test,errorType:e?.name||'Error'});}
+   const result={label:sample.label,httpStatus:r.status,contentType:contentType.split(';')[0]};
+   if(r.status>=300&&r.status<400){result.responseType='redirect';results.push(result);continue;}
+   if(contentType.includes('json')){
+    try{
+     const json=await r.json();
+     result.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
+     result.datasetKeys=json?.dataset&&typeof json.dataset==='object'?Object.keys(json.dataset).slice(0,10):[];
+     const stations=cwaStations(json);
+     result.taipeiStationCount=stations.length;
+     result.firstTaipeiSample=stations.length?{
+      stationId:String(stations[0].StationId??stations[0].StationID??''),
+      observedAt:stations[0].ObsTime?.DateTime??stations[0].DateTime??null,
+      airTemperature:stations[0].WeatherElement?.AirTemperature??stations[0].AirTemperature??null
+     }:null;
+     result.hasCwaError=Boolean(json?.error||json?.message||json?.dataset?.success==='false');
+    }catch{result.responseType='invalid-json';}
+   }else{result.responseType='non-json';}
+   results.push(result);
+  }catch(e){results.push({label:sample.label,requestFailed:true,errorType:e?.name||'Error'});}
  }
- return {diagnostic:'cwa-metadata-comparison',results};
+ return {diagnostic:'cwa-direct-getData',results};
 }
+
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='compare'){
-  return new Response(JSON.stringify(await taipeiMetadataDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});
+ if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='direct'){
+  try{return new Response(JSON.stringify(await directCwaDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
+  catch{return new Response(JSON.stringify({error:'CWA direct diagnostic failed'}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
+
  if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='sample'){
   try{return new Response(JSON.stringify(await taipeiSampleDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
   catch(e){return new Response(JSON.stringify({error:'CWA sample diagnostic failed',detail:String(e.message).replace(/Authorization=[^&\s]+/gi,'Authorization=[redacted]')}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
