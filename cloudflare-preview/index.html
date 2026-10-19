@@ -45,6 +45,18 @@ h1{font-size:28px;margin:7px 0 5px;letter-spacing:-.5px}
 .metric-label{font-size:13px;color:#c1d5e1}
 .metric-value{font-size:32px;letter-spacing:-1px;font-weight:720;margin:8px 0}
 .metric-note{font-size:11px;color:#9dbbcd;line-height:1.5}
+/* One compact wind card: direction and speed on the same line. */
+.wind-metric{grid-column:1/-1;padding:15px 17px}
+.wind-metric .metric-value{font-size:30px;letter-spacing:-.6px;margin:6px 0;white-space:nowrap}
+ .wind-metric .wind-unit{font-size:.68em;font-weight:650;letter-spacing:0}
+.wind-reading{display:flex;align-items:center;gap:11px;min-width:0}
+.wind-vane{width:37px;height:37px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:#8bd7e7}
+.wind-vane svg{width:100%;height:100%;overflow:visible}
+.wind-vane .vane-pointer{transform-origin:20px 20px;transition:transform .3s ease}
+.wind-vane[hidden]{display:none!important}
+.wind-reading-text{white-space:nowrap}
+@media(max-width:360px){.wind-vane{width:31px;height:31px}.wind-reading{gap:8px}}
+@media(max-width:360px){.wind-metric .metric-value{font-size:27px}}
 .section-title{font-size:15px;font-weight:700;margin:0 0 13px}
 .category{font-size:20px;color:#a8e5d0;font-weight:700;margin:4px 0 8px}
 .desc{font-size:13px;color:#c8dbe6;line-height:1.7;margin:0}
@@ -100,6 +112,15 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .hourly-panel{background:#203a50;border:1px solid #3e5b70;border-radius:19px;padding:17px 13px 12px;margin-bottom:16px}
 .hourly-title{font-size:16px;font-weight:750;margin:0 4px 4px}.hourly-subtitle{font-size:11px;color:#a9c5d7;margin:0 4px 12px}
 .hourly-chart{width:100%;height:auto;display:block;touch-action:pan-y}.hourly-detail{margin:8px 4px 2px;font-size:13px;color:#e5f3fc;min-height:22px}.hourly-status{font-size:11px;color:#b7cedd;margin:5px 4px 0}
+/* Compact, accessible data-source disclosure */
+.source-disclosure{margin:18px 2px 0;border-top:1px solid rgba(168,193,209,.20);color:#aac1d1}
+.source-disclosure summary{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:13px 2px;cursor:pointer;list-style:none;font-size:12px;font-weight:600;-webkit-tap-highlight-color:transparent}
+.source-disclosure summary::-webkit-details-marker{display:none}
+.source-disclosure summary::after{content:'⌄';font-size:20px;line-height:1;color:#9fcbd9;transition:transform .18s ease}
+.source-disclosure[open] summary::after{transform:rotate(180deg)}
+.source-disclosure summary:focus-visible{outline:2px solid #85d8e5;outline-offset:2px;border-radius:5px}
+.source-disclosure .source-content{font-size:11px;line-height:1.85;color:#aac1d1;padding:0 2px 14px}
+.source-disclosure .source-content p{margin:0}
 </style>
 </head>
 <body>
@@ -152,15 +173,10 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <div class="metric-value" id="dew">—</div>
     <div class="metric-note">Magnus 公式推算</div>
   </div>
-  <div class="metric">
-    <div class="metric-label">💨 平均風速</div>
-    <div class="metric-value" id="windSpeedValue">—</div>
-    <div class="metric-note" id="windNote">過去 10 分鐘平均 · m/s</div>
-  </div>
-  <div class="metric">
-    <div class="metric-label">🧭 風向</div>
-    <div class="metric-value" id="windDirectionValue">—</div>
-    <div class="metric-note">16 方位 · 風的來向</div>
+  <div class="metric wind-metric">
+    <div class="metric-label">💨 風向・風速</div>
+    <div class="metric-value" id="windCombinedValue" aria-live="polite">—</div>
+    <div class="metric-note" id="windNote">過去 10 分鐘平均 · 16 方位 · 箭頭指向風吹去的方向</div>
   </div>
 </div>
 
@@ -214,6 +230,12 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   <button id="reset" type="button">↺ 重設模擬數值</button>
 </div>
 
+<section class="hourly-panel" aria-label="過去24小時氣溫觀測" id="historyPanel">
+  <div class="hourly-title">過去 24 小時氣溫變化</div>
+  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C</p>
+  <div id="historyChart"></div><div id="historyDetail" class="hourly-detail"></div>
+  <div id="historyStatus" class="hourly-status">正在讀取測站歷史資料…</div>
+</section>
 <div class="actions"><button id="copy" type="button">複製目前數據</button></div>
 </section>
 <section class="page-panel" id="forecastPage" role="tabpanel" aria-labelledby="forecastTab" hidden>
@@ -231,7 +253,10 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
   <button type="button" id="forecastRefresh" class="mini">↻ 更新七天預報</button>
 </section>
-<p class="muted" id="footerSource">東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。未提供歷史趨勢。</p>
+<details class="source-disclosure" id="footerSource">
+  <summary>資料來源與計算方式</summary>
+  <div class="source-content"><p>東京與札幌使用日本氣象廳 JMA AMeDAS 實測資料；台北使用中央氣象署 CWA 臺北站 466920 官方實測資料；其餘四座城市使用 Open-Meteo 近期氣象模型資料（非測站實測）。露點統一由氣溫與濕度以 Magnus 公式推算。各城市的更新頻率與資料時間可能不同；缺值顯示 —。天氣概況：東京與札幌優先採 JMA 官方預報、台北採 CWA 官方預報；其他城市採 Open-Meteo 模型資料。天氣概況不是測站即時天空觀測，並與數值分開標示。手動模擬器可離線使用。東京、札幌及台北提供官方測站歷史氣溫趨勢。</p></div>
+</details>
 </main>
 <script>
 // Tokyo Meteo original multicolor outline weather icons (2026-10-18)
@@ -249,13 +274,56 @@ let city='tokyo';
 const FORECAST_LOCATIONS={tokyo:[35.6762,139.6503],taipei:[25.0330,121.5654],seoul:[37.5665,126.9780],'new-york':[40.7128,-74.0060],paris:[48.8566,2.3522],sapporo:[43.0618,141.3545],singapore:[1.3521,103.8198]};
 let activePage='observations',forecastController=null;
 const forecastCache=new Map();
+
 function setPage(page){
  activePage=page;
  const forecast=page==='forecast';
  $('observationsPage').hidden=forecast;$('forecastPage').hidden=!forecast;
  $('observationsTab').classList.toggle('active',!forecast);$('forecastTab').classList.toggle('active',forecast);
  $('observationsTab').setAttribute('aria-selected',String(!forecast));$('forecastTab').setAttribute('aria-selected',String(forecast));
- if(forecast){loadForecast();loadHourly();}
+ if(forecast){loadForecast();loadHourly();}else{loadHistory();}
+}
+// JMA history is measured data; never substitute model values while labeling it measured.
+const historyCache=new Map();let historyRequest=0;
+async function loadHistory(force=false){
+ const panel=$('historyPanel');if(!panel)return;
+ const forCity=city,id=++historyRequest;
+ if(!CITIES[forCity].isJMA&&!CITIES[forCity].isCWA){panel.hidden=true;return;}
+ panel.hidden=false;
+ const isTaipei=Boolean(CITIES[forCity].isCWA);
+ $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C';
+ const cached=historyCache.get(forCity);
+ if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
+ $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
+ try{
+  const r=await fetch('/api/observed-history?city='+encodeURIComponent(forCity));
+  const data=await r.json();if(!r.ok)throw Error(data.error||'資料無法取得');
+  if(city!==forCity||id!==historyRequest)return;
+  historyCache.set(forCity,{data,saved:Date.now()});renderHistory(data);
+ }catch(e){if(city===forCity&&id===historyRequest){$('historyChart').replaceChildren();$('historyDetail').textContent='';$('historyStatus').textContent='⚠ '+(isTaipei?'CWA 臺北':'JMA')+' 歷史觀測暫不可用：'+e.message;}}
+}
+function renderHistory(data){
+ const points=data.points,root=$('historyChart');root.replaceChildren();
+ if(!points?.length)return;
+ const ns='http://www.w3.org/2000/svg';
+ const el=(tag,a={})=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(a))n.setAttribute(k,String(v));return n};
+ const svg=el('svg',{viewBox:'0 0 360 216',class:'hourly-chart',role:'img','aria-label':'過去24小時測站實測氣溫'});
+ const left=35,right=342,top=24,bottom=168;
+ const values=points.map(p=>p.temp),min=Math.floor(Math.min(...values)-2),max=Math.ceil(Math.max(...values)+2);
+ const y=v=>bottom-(v-min)/Math.max(1,max-min)*(bottom-top);
+ const ts=points.map(p=>Date.parse(p.time)),start=ts[0],span=Math.max(1,ts[ts.length-1]-start);
+ const x=i=>left+(ts[i]-start)/span*(right-left);
+ for(let i=0;i<=4;i++){const v=min+(max-min)*i/4,yy=y(v);svg.append(el('line',{x1:left,y1:yy,x2:right,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5','stroke-width':'.8'}));const t=el('text',{x:left-6,y:yy+3,'text-anchor':'end',fill:'#afc9da','font-size':10});t.textContent=Math.round(v)+'°';svg.append(t)}
+ // Break the curve where the station has no readings for more than 20 minutes.
+ let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#73c5d9','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
+ points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>(data.resolutionMinutes===60?90:20)*60000)flush();segment.push([x(i),y(p.temp)])});flush();
+ const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
+ for(let i=0;i<5;i++){const idx=Math.round((points.length-1)*i/4),t=el('text',{x:x(idx),y:193,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#b7cedd','font-size':10});t.textContent=fmt(points[idx].time);svg.append(t)}
+ const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1});const dot=el('circle',{r:4.5,fill:'#73c5d9',stroke:'#203a50','stroke-width':2});svg.append(cursor,dot);
+ const select=i=>{const p=points[i];cursor.setAttribute('x1',x(i));cursor.setAttribute('x2',x(i));dot.setAttribute('cx',x(i));dot.setAttribute('cy',y(p.temp));$('historyDetail').textContent=new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(p.time))+'　實測 '+p.temp.toFixed(1)+'°C'};
+ svg.addEventListener('pointerdown',e=>{const r=svg.getBoundingClientRect(),pos=(e.clientX-r.left)/r.width*360;let best=0;points.forEach((p,i)=>{if(Math.abs(x(i)-pos)<Math.abs(x(best)-pos))best=i});select(best)});
+ root.append(svg);select(points.length-1);
+ $('historyStatus').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站':'JMA AMeDAS')+' '+data.station+' · '+points.length+' 筆實測 · 缺測區間不補值';
 }
 // The hourly curve is a forecast, separate from the official live observation.
 const hourlyCache=new Map();
@@ -580,7 +648,7 @@ function updateCityLabels(){
  $('sourceDescription').textContent=j?'每 10 分鐘嘗試讀取'+c.name+' AMeDAS 最新資料；實際觀測時間以氣象廳回傳為準。':c.isCWA?'每 10 分鐘嘗試讀取中央氣象署臺北站官方觀測資料；實際時間以 CWA 回傳為準。':'每 10 分鐘嘗試取得 Open-Meteo 最新可用模型資料。這不是官方測站即時觀測值。';
  $('sourceDetail').textContent=j?'來源：JMA '+c.name+'站':c.isCWA?'來源：CWA 臺北站':'來源：Open-Meteo 模型';
  $('humidityNote').textContent=o?'觀測值':'模型估計值';
- $('windNote').textContent=j?'過去 10 分鐘平均 · m/s':c.isCWA?'測站平均風速 · m/s':'模型風速 · m/s';
+ $('windNote').textContent=(j?'過去 10 分鐘平均':c.isCWA?'測站平均風速':'模型風速')+' · 16 方位 · 箭頭指向風吹去的方向';
 }
 function clearObservation(){
  clearCondition();$('weatherStoryTitle').textContent='正在分析天氣…';$('weatherStoryDetail').textContent='取得有效資料後，將顯示當地天氣描述。';
@@ -594,15 +662,43 @@ function switchCity(next){
  $('refresh').disabled=false;
  try{localStorage.setItem('meteo-city',city)}catch(e){}
  updateCityLabels();
- if(activePage==='forecast'){loadForecast(true);loadHourly();}
+ if(activePage==='forecast'){loadForecast(true);loadHourly();}else loadHistory();
  if(mode==='manual')setMode('auto');else{clearObservation();fetchLatest()}
 }
 
 const WIND_DIRECTIONS=['靜穩','北北東','東北','東北東','東','東南東','東南','南南東','南','南南西','西南','西南西','西','西北西','西北','北北西','北'];
+function windDirectionLabel(dir){
+ return Number.isInteger(dir)&&dir>=0&&dir<=16?WIND_DIRECTIONS[dir]:(typeof dir==='string'&&dir.trim()&&dir.trim()!=='—'?dir.trim():'—');
+}
+// Wind names indicate where wind comes FROM; arrow points where it blows TO (180 degrees opposite).
+function windBearing(dir){
+ if(Number.isInteger(dir)&&dir>=1&&dir<=16)return (dir%16)*22.5;
+ if(typeof dir!=='string')return null;
+ const normalized=dir.trim().replace(/風$/,'');
+ const index=WIND_DIRECTIONS.indexOf(normalized);
+ if(index>0)return (index%16)*22.5;
+ const english={N:0,NNE:22.5,NE:45,ENE:67.5,E:90,ESE:112.5,SE:135,SSE:157.5,S:180,SSW:202.5,SW:225,WSW:247.5,W:270,WNW:292.5,NW:315,NNW:337.5};
+ return Object.hasOwn(english,normalized.toUpperCase())?english[normalized.toUpperCase()]:null;
+}
 function showWind(obs){
- const speed=obs?.windSpeed,dir=obs?.windDirection;
- $('windSpeedValue').textContent=typeof speed==='number'&&Number.isFinite(speed)?speed.toFixed(1)+' m/s':'—';
- $('windDirectionValue').textContent=Number.isInteger(dir)&&dir>=0&&dir<=16?WIND_DIRECTIONS[dir]:(typeof dir==='string'&&dir.trim()&&dir.trim()!=='—'?dir.trim():'—');
+ const speed=obs?.windSpeed,rawDirection=obs?.windDirection,dir=windDirectionLabel(rawDirection);
+ const speedValid=typeof speed==='number'&&Number.isFinite(speed);
+ const target=$('windCombinedValue');target.replaceChildren();
+ if(!speedValid&&dir==='—'){target.textContent='—';return;}
+ const reading=document.createElement('span');reading.className='wind-reading';
+ const bearing=windBearing(rawDirection);
+ if(bearing!==null&&!(speedValid&&speed<0.3)){
+  const vane=document.createElement('span');vane.className='wind-vane';vane.setAttribute('aria-hidden','true');
+  vane.innerHTML='<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="17" stroke="currentColor" stroke-opacity=".38" stroke-width="1.6"/><circle cx="20" cy="20" r="2.5" fill="currentColor"/><g class="vane-pointer"><path d="M20 4 L26 22 L20 19 L14 22 Z" fill="currentColor"/><path d="M20 22 V32" stroke="currentColor" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/></g></svg>';
+  vane.querySelector('.vane-pointer').style.transform='rotate('+((bearing+180)%360)+'deg)';
+  reading.append(vane);
+ }
+ const text=document.createElement('span');text.className='wind-reading-text';
+ const direction=document.createElement('span');direction.textContent=dir;
+ const speedPart=document.createElement('span');speedPart.textContent=speedValid?speed.toFixed(1):'—';
+ const unit=document.createElement('span');unit.className='wind-unit';unit.textContent='m/s';
+ text.append(direction,document.createTextNode('　'),speedPart,document.createTextNode(' '),unit);
+ reading.append(text);target.append(reading);target.setAttribute('aria-label','風向 '+dir+'，風速 '+(speedValid?speed.toFixed(1)+' 公尺每秒':'無資料'));
 }
 try{const saved=JSON.parse(localStorage.getItem('dewpoint-settings'));if(saved&&Number.isFinite(+saved.t)&&Number.isFinite(+saved.h)){t.value=saved.t;h.value=saved.h}}catch(e){}
 function calculate(temp,rh){
@@ -740,7 +836,7 @@ $('copy').onclick=async()=>{
  const rh=mode==='auto'?(lastObs?Number(lastObs.humidity):NaN):Number(h.value);
  if(!Number.isFinite(temp)||!Number.isFinite(rh)){alert('目前沒有可複製的有效觀測數據');return}
  const d=calculate(temp,rh);
- const wind=mode==='auto'&&lastObs&&Number.isFinite(lastObs.windSpeed)?'\n風速：'+lastObs.windSpeed.toFixed(1)+' m/s\n風向：'+$('windDirectionValue').textContent:'';
+ const wind=mode==='auto'&&lastObs&&Number.isFinite(lastObs.windSpeed)?'\n風速：'+lastObs.windSpeed.toFixed(1)+' m/s\n風向：'+windDirectionLabel(lastObs.windDirection):'';
  const s=`${mode==='auto'?cityInfo().name+' '+citySource()+' · '+lastObs.observedAt:'氣象模擬器（非實測）'}\n氣溫：${temp.toFixed(1)}°C\n相對濕度：${rh}%\n露點（推算）：${d.toFixed(1)}°C${wind}`;
  try{await navigator.clipboard.writeText(s);alert('已複製數據')}catch(e){prompt('複製數據',s)}
 };
@@ -770,5 +866,6 @@ syncCityMenu();updateCityLabels();setMode('auto');
 setInterval(()=>{if(mode==='auto'&&!document.hidden)fetchLatest()},600000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&mode==='auto')fetchLatest()});
 // Cloudflare preview: do not register the legacy Netlify service worker.
+queueMicrotask(()=>loadHistory());
 </script>
 </body></html>
