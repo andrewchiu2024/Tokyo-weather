@@ -269,8 +269,10 @@ const historyCache=new Map();let historyRequest=0;
 async function loadHistory(force=false){
  const panel=$('historyPanel');if(!panel)return;
  const forCity=city,id=++historyRequest;
- if(!CITIES[forCity].isJMA){panel.hidden=true;return;}
+ const isTaipei=forCity==='taipei';
+ if(!CITIES[forCity].isJMA&&!isTaipei){panel.hidden=true;return;}
  panel.hidden=false;
+ panel.querySelector('.hourly-subtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C':'日本氣象廳 AMeDAS · 每 10 分鐘實測 · °C';
  const cached=historyCache.get(forCity);
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
  $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
@@ -295,7 +297,7 @@ function renderHistory(data){
  for(let i=0;i<=4;i++){const v=min+(max-min)*i/4,yy=y(v);svg.append(el('line',{x1:left,y1:yy,x2:right,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5','stroke-width':'.8'}));const t=el('text',{x:left-6,y:yy+3,'text-anchor':'end',fill:'#afc9da','font-size':10});t.textContent=Math.round(v)+'°';svg.append(t)}
  // Break the curve where the station has no readings for more than 20 minutes.
  let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:'#73c5d9','stroke-width':2.6,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
- points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>20*60000)flush();segment.push([x(i),y(p.temp)])});flush();
+ points.forEach((p,i)=>{if(i&&ts[i]-ts[i-1]>(data.resolutionMinutes===60?90:20)*60000)flush();segment.push([x(i),y(p.temp)])});flush();
  const fmt=t=>new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[city].zone,hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(t));
  for(let i=0;i<5;i++){const idx=Math.round((points.length-1)*i/4),t=el('text',{x:x(idx),y:193,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#b7cedd','font-size':10});t.textContent=fmt(points[idx].time);svg.append(t)}
  const cursor=el('line',{x1:left,y1:top,x2:left,y2:bottom,stroke:'#e9f4fa','stroke-dasharray':'4 4','stroke-width':1});const dot=el('circle',{r:4.5,fill:'#73c5d9',stroke:'#203a50','stroke-width':2});svg.append(cursor,dot);
