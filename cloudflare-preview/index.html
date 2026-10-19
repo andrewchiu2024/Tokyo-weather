@@ -122,13 +122,20 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .source-disclosure .source-content{font-size:11px;line-height:1.85;color:#aac1d1;padding:0 2px 14px}
 .source-disclosure .source-content p{margin:0}
 /* My Cities v2.0 */
-.city-manager-open{display:block;width:100%;margin:-3px 0 16px;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700}
+.city-manager-open{display:flex;width:100%;align-items:center;justify-content:center;margin:7px 0 0;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700;min-height:48px}.city-manager-open:focus-visible{outline:2px solid #85d8e5;outline-offset:2px}
 .city-modal[hidden]{display:none!important}.city-modal{position:fixed;inset:0;z-index:100;background:rgba(5,14,24,.82);display:flex;align-items:center;justify-content:center;padding:16px}
 .city-dialog{width:min(100%,520px);max-height:90dvh;overflow:auto;background:#192f43;border:1px solid #54778b;border-radius:20px;padding:20px;box-shadow:0 15px 55px #0008}
 .city-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.city-dialog h2{margin:0;font-size:20px}
 .city-search{width:100%;background:#10283a;color:#fff;border:1px solid #65879b;border-radius:12px;padding:14px;font:inherit;outline-offset:2px}
 .city-search-results{margin:9px 0 16px;max-height:210px;overflow:auto}.city-result,.managed-city{display:flex;align-items:center;gap:7px;justify-content:space-between;padding:10px 6px;border-bottom:1px solid #385369}
 .city-result button,.managed-city button{padding:8px 11px;font-size:12px}.city-result-name{flex:1;min-width:0;font-size:13px;line-height:1.5}.city-result-name small{display:block;color:#a9c5d7}
+/* v2.1: touch-friendly city ordering */
+.managed-city{border-radius:12px;transition:background .12s ease;min-height:55px}
+.managed-city.dragging{background:#31556b;opacity:.88;outline:1px solid #85d8e5}
+.managed-city.drag-over{box-shadow:inset 0 3px 0 #85d8e5;background:#26485e}
+.managed-city .drag-handle{font-size:21px;min-width:40px;min-height:42px;touch-action:none;cursor:grab;color:#b7e9f0;user-select:none;-webkit-user-select:none;display:grid;place-items:center}
+.managed-city .drag-handle:active{cursor:grabbing}
+.managed-city .city-result-name{overflow-wrap:anywhere}
 .city-manager-note{font-size:11px;color:#b7cedd;line-height:1.7;margin:9px 0}.managed-city .city-result-name{font-size:14px}.managed-city button:disabled{opacity:.3}
 </style>
 </head>
@@ -152,16 +159,15 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <button type="button" class="city-option" role="option" data-city="singapore" aria-selected="false">新加坡 · Singapore <span class="city-check" aria-hidden="true">✓</span></button>
   </div>
 </details>
-<button type="button" class="city-manager-open" id="openCityManager">＋ 搜尋／新增／管理城市</button>
 <div class="city-modal" id="cityModal" hidden>
   <div class="city-dialog" role="dialog" aria-modal="true" aria-labelledby="cityDialogTitle">
     <div class="city-dialog-head"><h2 id="cityDialogTitle">我的城市</h2><button type="button" id="closeCityManager" aria-label="關閉">✕</button></div>
     <label for="citySearch" class="city-label">搜尋全球城市（中文／英文／當地語言）</label>
     <input id="citySearch" class="city-search" type="search" placeholder="例如：大阪、London、Vancouver" autocomplete="off">
     <div id="citySearchResults" class="city-search-results" aria-live="polite"></div>
-    <div class="section-title">我的城市 · 可調整順序</div>
+    <div class="section-title">我的城市 · 長按 ☰ 拖曳排序</div>
     <div id="managedCities"></div>
-    <p class="city-manager-note">城市清單只儲存在目前瀏覽器。原有東京、札幌、台北仍使用官方觀測；其他城市使用 Open-Meteo 模型資料。至少保留一座城市。</p>
+    <p class="city-manager-note">長按左側 ☰ 可拖曳排序；也能使用鍵盤方向鍵調整。城市清單只儲存在目前瀏覽器。原有東京、札幌、台北仍使用官方觀測；其他城市使用 Open-Meteo 模型資料。至少保留一座城市。</p>
   </div>
 </div>
 
@@ -915,6 +921,7 @@ function rebuildCityMenu(){
   const check=document.createElement('span');check.className='city-check';check.setAttribute('aria-hidden','true');check.textContent='✓';b.append(check);
   b.addEventListener('click',()=>{switchCity(key);syncCityMenu();$('cityPicker').open=false});menu.append(b);
  }
+ const manage=document.createElement('button');manage.type='button';manage.className='city-manager-open';manage.id='openCityManager';manage.textContent='＋ 新增／管理城市';manage.addEventListener('click',openManager);menu.append(manage);
  cityOptions=[...menu.querySelectorAll('.city-option')];syncCityMenu();
 }
 // Native <details> controls opening on iPhone without JavaScript.
@@ -941,12 +948,60 @@ const cityModal=$('cityModal'),citySearch=$('citySearch'),cityResults=$('citySea
 let searchTimer=null,searchController=null,searchSequence=0;
 function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();citySearch.focus() }
 function closeManager(){cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
-$('openCityManager').onclick=openManager;$('closeCityManager').onclick=closeManager;
+$('closeCityManager').onclick=closeManager;
 cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
-function renderManagedCities(){const root=$('managedCities');root.replaceChildren();myCityOrder.forEach((key,i)=>{const c=CITIES[key],row=document.createElement('div');row.className='managed-city';const label=document.createElement('span');label.className='city-result-name';label.textContent=c.name;row.append(label);
-  const up=document.createElement('button');up.textContent='↑';up.title='往上移';up.disabled=i===0;up.onclick=()=>moveCity(i,-1);row.append(up);
-  const down=document.createElement('button');down.textContent='↓';down.title='往下移';down.disabled=i===myCityOrder.length-1;down.onclick=()=>moveCity(i,1);row.append(down);
-  const del=document.createElement('button');del.textContent='刪除';del.disabled=myCityOrder.length===1;del.onclick=()=>removeCity(key);row.append(del);root.append(row)})}
+function renderManagedCities(){
+ const root=$('managedCities');root.replaceChildren();
+ myCityOrder.forEach((key,i)=>{
+  const c=CITIES[key],row=document.createElement('div');row.className='managed-city';row.dataset.key=key;
+  const handle=document.createElement('button');handle.type='button';handle.className='drag-handle';handle.textContent='☰';handle.title='拖曳排序 '+c.name;handle.setAttribute('aria-label','拖曳排序 '+c.name+'；鍵盤上下方向鍵可移動');
+  handle.addEventListener('pointerdown',beginCityDrag);handle.addEventListener('keydown',e=>{
+   if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+    e.preventDefault();const idx=myCityOrder.indexOf(key),next=idx+(e.key==='ArrowUp'?-1:1);
+    if(next<0||next>=myCityOrder.length)return;
+    moveCity(idx,next-idx);[...root.querySelectorAll('.managed-city')].find(r=>r.dataset.key===key)?.querySelector('.drag-handle')?.focus();
+   }
+  });row.append(handle);
+  const label=document.createElement('span');label.className='city-result-name';label.textContent=c.name;row.append(label);
+  const del=document.createElement('button');del.type='button';del.textContent='刪除';del.disabled=myCityOrder.length===1;del.onclick=()=>removeCity(key);row.append(del);root.append(row);
+ });
+}
+let activeCityDrag=null;
+function beginCityDrag(e){
+ if(e.button!==0||activeCityDrag)return;
+ const handle=e.currentTarget,key=handle.closest('.managed-city')?.dataset.key;
+ if(!key)return;
+ e.preventDefault();handle.setPointerCapture(e.pointerId);
+ activeCityDrag={key,pointerId:e.pointerId,handle,target:null};
+ handle.closest('.managed-city').classList.add('dragging');
+ handle.addEventListener('pointermove',updateCityDrag);
+ handle.addEventListener('pointerup',finishCityDrag);
+ handle.addEventListener('pointercancel',cancelCityDrag);
+ handle.addEventListener('lostpointercapture',cancelCityDrag);
+}
+function updateCityDrag(e){
+ const drag=activeCityDrag;if(!drag||e.pointerId!==drag.pointerId)return;
+ const rows=[...$('managedCities').querySelectorAll('.managed-city')];
+ rows.forEach(row=>row.classList.remove('drag-over'));
+ const hit=rows.find(row=>{const r=row.getBoundingClientRect();return e.clientY>=r.top&&e.clientY<=r.bottom;});
+ if(hit&&hit.dataset.key!==drag.key){drag.target=hit.dataset.key;hit.classList.add('drag-over');}
+ else drag.target=null;
+}
+function finishCityDrag(e){
+ const drag=activeCityDrag;if(!drag||e.pointerId!==drag.pointerId)return;
+ const from=myCityOrder.indexOf(drag.key),to=myCityOrder.indexOf(drag.target);
+ clearCityDrag();
+ if(from<0||to<0||from===to)return;
+ const [moved]=myCityOrder.splice(from,1);myCityOrder.splice(to,0,moved);
+ saveMyCities();rebuildCityMenu();renderManagedCities();
+}
+function cancelCityDrag(e){if(activeCityDrag&&e.pointerId===activeCityDrag.pointerId)clearCityDrag()}
+function clearCityDrag(){
+ const drag=activeCityDrag;if(!drag)return;activeCityDrag=null;
+ const h=drag.handle;h.removeEventListener('pointermove',updateCityDrag);h.removeEventListener('pointerup',finishCityDrag);h.removeEventListener('pointercancel',cancelCityDrag);h.removeEventListener('lostpointercapture',cancelCityDrag);
+ if(h.hasPointerCapture(drag.pointerId))h.releasePointerCapture(drag.pointerId);
+ $('managedCities').querySelectorAll('.managed-city').forEach(row=>row.classList.remove('dragging','drag-over'));
+}
 function moveCity(i,d){const j=i+d;if(j<0||j>=myCityOrder.length)return;[myCityOrder[i],myCityOrder[j]]=[myCityOrder[j],myCityOrder[i]];saveMyCities();rebuildCityMenu();renderManagedCities()}
 function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder.filter(k=>k!==key);if(key===city)switchCity(myCityOrder[0]);if(CITIES[key]?.isCustom){delete CITIES[key];delete FORECAST_LOCATIONS[key];forecastCache.delete(key);hourlyCache.delete(key);conditionCache.delete(key)}saveMyCities();rebuildCityMenu();renderManagedCities()}
 function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
