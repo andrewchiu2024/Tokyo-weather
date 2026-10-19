@@ -122,7 +122,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .source-disclosure .source-content{font-size:11px;line-height:1.85;color:#aac1d1;padding:0 2px 14px}
 .source-disclosure .source-content p{margin:0}
 /* My Cities v2.0 */
-.city-manager-open{display:block;width:100%;margin:-3px 0 16px;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700}
+.city-manager-open{display:flex;width:100%;align-items:center;justify-content:center;margin:7px 0 0;background:#25495f;border:1px solid #52758b;color:#a6e9ed;font-weight:700;min-height:48px}.city-manager-open:focus-visible{outline:2px solid #85d8e5;outline-offset:2px}
 .city-modal[hidden]{display:none!important}.city-modal{position:fixed;inset:0;z-index:100;background:rgba(5,14,24,.82);display:flex;align-items:center;justify-content:center;padding:16px}
 .city-dialog{width:min(100%,520px);max-height:90dvh;overflow:auto;background:#192f43;border:1px solid #54778b;border-radius:20px;padding:20px;box-shadow:0 15px 55px #0008}
 .city-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.city-dialog h2{margin:0;font-size:20px}
@@ -159,7 +159,6 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <button type="button" class="city-option" role="option" data-city="singapore" aria-selected="false">新加坡 · Singapore <span class="city-check" aria-hidden="true">✓</span></button>
   </div>
 </details>
-<button type="button" class="city-manager-open" id="openCityManager">＋ 搜尋／新增／管理城市</button>
 <div class="city-modal" id="cityModal" hidden>
   <div class="city-dialog" role="dialog" aria-modal="true" aria-labelledby="cityDialogTitle">
     <div class="city-dialog-head"><h2 id="cityDialogTitle">我的城市</h2><button type="button" id="closeCityManager" aria-label="關閉">✕</button></div>
@@ -922,6 +921,7 @@ function rebuildCityMenu(){
   const check=document.createElement('span');check.className='city-check';check.setAttribute('aria-hidden','true');check.textContent='✓';b.append(check);
   b.addEventListener('click',()=>{switchCity(key);syncCityMenu();$('cityPicker').open=false});menu.append(b);
  }
+ const manage=document.createElement('button');manage.type='button';manage.className='city-manager-open';manage.id='openCityManager';manage.textContent='＋ 新增／管理城市';manage.addEventListener('click',openManager);menu.append(manage);
  cityOptions=[...menu.querySelectorAll('.city-option')];syncCityMenu();
 }
 // Native <details> controls opening on iPhone without JavaScript.
@@ -948,7 +948,7 @@ const cityModal=$('cityModal'),citySearch=$('citySearch'),cityResults=$('citySea
 let searchTimer=null,searchController=null,searchSequence=0;
 function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();citySearch.focus() }
 function closeManager(){cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
-$('openCityManager').onclick=openManager;$('closeCityManager').onclick=closeManager;
+$('closeCityManager').onclick=closeManager;
 cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
 function renderManagedCities(){
  const root=$('managedCities');root.replaceChildren();
