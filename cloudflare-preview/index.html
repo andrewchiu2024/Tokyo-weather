@@ -301,7 +301,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   </section>
   <div id="forecastStatus" class="status loading" role="status" aria-live="polite">尚未載入預報</div>
   <div id="forecastDays"></div>
-  <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他城市使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
+  <p class="forecast-note">資料來源：東京、札幌優先採用 JMA 週間氣溫預報；台北優先採用 CWA 一週氣溫與濕度預報。官方未提供或暫時缺少的欄位由 Open-Meteo 補足；其他非日本城市使用 Open-Meteo；新增日本城市也會優先匹配 JMA 週間預報，無法可靠匹配或官方資料不足時使用 Open-Meteo。每個日期分別標示氣溫與濕度來源。濕度平均值為該來源預報時段的算術平均；預報並非即時測站觀測。</p>
   <button type="button" id="forecastRefresh" class="mini">↻ 更新七天預報</button>
 </section>
 <details class="source-disclosure" id="footerSource">
@@ -329,13 +329,13 @@ try{
  if(saved&&Array.isArray(saved.order)&&saved.order.length){
   for(const item of saved.custom||[]){
    if(item&&/^geo-\d+$/.test(item.id)&&typeof item.name==='string'&&item.name.length<120&&Number.isFinite(item.lat)&&Number.isFinite(item.lon)&&Math.abs(item.lat)<=90&&Math.abs(item.lon)<=180&&typeof item.zone==='string'){
-    CITIES[item.id]={name:item.name,zone:item.zone,lat:item.lat,lon:item.lon,country:item.country||'',countryCode:item.countryCode||'',isCustom:true};
+    CITIES[item.id]={name:item.name,zone:item.zone,lat:item.lat,lon:item.lon,country:item.country||'',countryCode:item.countryCode||'',admin1:item.admin1||'',isCustom:true};
    }
   }
   const keys=[...new Set(saved.order)].filter(k=>CITIES[k]);if(keys.length)myCityOrder=keys;
  }
 }catch(e){}
-function saveMyCities(){try{localStorage.setItem('meteo-my-cities-v2',JSON.stringify({order:myCityOrder,custom:Object.entries(CITIES).filter(([,v])=>v.isCustom).map(([id,v])=>({id,name:v.name,zone:v.zone,lat:v.lat,lon:v.lon,country:v.country,countryCode:v.countryCode}))}))}catch(e){}}
+function saveMyCities(){try{localStorage.setItem('meteo-my-cities-v2',JSON.stringify({order:myCityOrder,custom:Object.entries(CITIES).filter(([,v])=>v.isCustom).map(([id,v])=>({id,name:v.name,zone:v.zone,lat:v.lat,lon:v.lon,country:v.country,countryCode:v.countryCode,admin1:v.admin1||''}))}))}catch(e){}}
 function isCustomCity(key=city){return Boolean(CITIES[key]?.isCustom)}
 function isJapaneseCustom(key=city){const c=CITIES[key];return Boolean(c?.isCustom&&(c.zone==='Asia/Tokyo')&&(c.country==='Japan'||c.country==='日本'||c.countryCode==='JP'))}
 function isOfficialCity(key=city){return Boolean(CITIES[key]?.isJMA||CITIES[key]?.isCWA||CITIES[key]?.jmaStationId)}
@@ -488,9 +488,12 @@ async function loadForecast(force=false){
  $('forecastStatus').textContent='正在取得'+CITIES[forCity].name+'七天預報…';$('forecastStatus').className='status loading';
  if(!cached)$('forecastDays').replaceChildren();
  try{
-  const response=await fetch(isCustomCity(forCity)?openMeteoDailyURL(forCity):'/api/seven-day-forecast?city='+encodeURIComponent(forCity),{signal:controller.signal,cache:'no-store'});
+  const jmaCustom=isJapaneseCustom(forCity);
+  const c=CITIES[forCity];
+  const url=jmaCustom?'/api/seven-day-forecast?'+new URLSearchParams({city:'custom',lat:String(c.lat),lon:String(c.lon),zone:c.zone,name:c.name,admin1:c.admin1||'',country:'JP'}).toString():isCustomCity(forCity)?openMeteoDailyURL(forCity):'/api/seven-day-forecast?city='+encodeURIComponent(forCity);
+  const response=await fetch(url,{signal:controller.signal,cache:'no-store'});
    const raw=await response.json();
-   const data=isCustomCity(forCity)?normalizeOpenMeteoDaily(raw):raw;
+   const data=isCustomCity(forCity)&&!jmaCustom?normalizeOpenMeteoDaily(raw):raw;
   if(!response.ok)throw new Error(data.error||'HTTP '+response.status);
   if(!Array.isArray(data.days)||!data.days.length)throw new Error('預報資料不完整');
   if(city!==forCity||activePage!=='forecast'||controller.signal.aborted)return;
@@ -1042,7 +1045,7 @@ function clearCityDrag(){
 function moveCity(i,d){const j=i+d;if(j<0||j>=myCityOrder.length)return;[myCityOrder[i],myCityOrder[j]]=[myCityOrder[j],myCityOrder[i]];saveMyCities();rebuildCityMenu();renderManagedCities()}
 function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder.filter(k=>k!==key);if(key===city)switchCity(myCityOrder[0]);if(CITIES[key]?.isCustom){delete CITIES[key];delete FORECAST_LOCATIONS[key];forecastCache.delete(key);hourlyCache.delete(key);conditionCache.delete(key)}saveMyCities();rebuildCityMenu();renderManagedCities()}
 function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
-function addCity(item){citySearch.blur();const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',countryCode:item.countryCode||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);syncCityMenu();closeManager()}
+function addCity(item){citySearch.blur();const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',countryCode:item.countryCode||'',admin1:item.admin1||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);syncCityMenu();closeManager()}
 function renderSearchResults(results){cityResults.replaceChildren();if(!results.length){cityResults.textContent='找不到符合的城市，請嘗試英文或當地名稱。';return}for(const item of results){if(!Number.isFinite(Number(item.latitude))||!Number.isFinite(Number(item.longitude))||!item.id)continue;const key=cityMatch(item)||'geo-'+item.id,row=document.createElement('div');row.className='city-result';const label=document.createElement('span');label.className='city-result-name';label.textContent=item.name;const sub=document.createElement('small');sub.textContent=[item.admin1,item.country].filter(Boolean).join(' · ');label.append(sub);const button=document.createElement('button');button.textContent=myCityOrder.includes(key)?'已加入':'＋ 加入';button.disabled=myCityOrder.includes(key);button.onclick=()=>addCity(item);row.append(label,button);cityResults.append(row)}}
 // Traditional-Chinese city names are not consistently indexed by Open-Meteo.
 // Resolve common translated names to their native/English names, and merge
