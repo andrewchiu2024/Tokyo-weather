@@ -129,6 +129,13 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 .city-search{width:100%;background:#10283a;color:#fff;border:1px solid #65879b;border-radius:12px;padding:14px;font:inherit;outline-offset:2px}
 .city-search-results{margin:9px 0 16px;max-height:210px;overflow:auto}.city-result,.managed-city{display:flex;align-items:center;gap:7px;justify-content:space-between;padding:10px 6px;border-bottom:1px solid #385369}
 .city-result button,.managed-city button{padding:8px 11px;font-size:12px}.city-result-name{flex:1;min-width:0;font-size:13px;line-height:1.5}.city-result-name small{display:block;color:#a9c5d7}
+/* Mobile keyboard: keep search results independently scrollable and dialog visible. */
+.city-search-results{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+@media(max-width:600px){
+ .city-modal{top:var(--city-viewport-top,0px);bottom:auto;height:var(--city-viewport-height,100dvh);padding:10px;align-items:flex-start}
+ .city-dialog{max-height:calc(var(--city-viewport-height,100dvh) - 20px);overflow-y:auto;overscroll-behavior:contain;padding:16px}
+ .city-search-results{max-height:min(210px,30dvh);min-height:0}
+}
 /* v2.1: touch-friendly city ordering */
 .managed-city{border-radius:12px;transition:background .12s ease;min-height:55px}
 .managed-city.dragging{background:#31556b;opacity:.88;outline:1px solid #85d8e5}
@@ -963,8 +970,16 @@ function openMeteoCondition(code){if(code===0)return {label:'晴朗',icon:'sun'}
 async function loadCustomCondition(key,id){try{const r=await fetch(openMeteoCurrentURL(key));if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(key!==city||id!==requestId||mode!=='auto')return;const c=openMeteoCondition(data.current?.weather_code);const item={...c,sourceLabel:'Open-Meteo 天氣模型'};if(lastObs)lastObs.weatherCondition=item;showCondition(item)}catch(e){if(key===city&&id===requestId)showCondition({label:'天氣概況暫不可用',icon:null,sourceLabel:'Open-Meteo 暫不可用'})}}
 const cityModal=$('cityModal'),citySearch=$('citySearch'),cityResults=$('citySearchResults');
 let searchTimer=null,searchController=null,searchSequence=0;
-function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();citySearch.focus() }
-function closeManager(){cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
+function syncCityModalViewport(){
+ if(cityModal.hidden)return;
+ const viewport=window.visualViewport;
+ cityModal.style.setProperty('--city-viewport-height',(viewport?.height||window.innerHeight)+'px');
+ cityModal.style.setProperty('--city-viewport-top',(viewport?.offsetTop||0)+'px');
+}
+window.visualViewport?.addEventListener('resize',syncCityModalViewport);
+window.visualViewport?.addEventListener('scroll',syncCityModalViewport);
+function openManager(){ $('cityPicker').open=false;cityModal.hidden=false;renderManagedCities();syncCityModalViewport();citySearch.focus() }
+function closeManager(){citySearch.blur();cityModal.hidden=true;clearTimeout(searchTimer);searchController?.abort()}
 $('closeCityManager').onclick=closeManager;
 cityModal.addEventListener('click',e=>{if(e.target===cityModal)closeManager()});
 function renderManagedCities(){
@@ -1022,7 +1037,7 @@ function clearCityDrag(){
 function moveCity(i,d){const j=i+d;if(j<0||j>=myCityOrder.length)return;[myCityOrder[i],myCityOrder[j]]=[myCityOrder[j],myCityOrder[i]];saveMyCities();rebuildCityMenu();renderManagedCities()}
 function removeCity(key){if(myCityOrder.length<=1)return;myCityOrder=myCityOrder.filter(k=>k!==key);if(key===city)switchCity(myCityOrder[0]);if(CITIES[key]?.isCustom){delete CITIES[key];delete FORECAST_LOCATIONS[key];forecastCache.delete(key);hourlyCache.delete(key);conditionCache.delete(key)}saveMyCities();rebuildCityMenu();renderManagedCities()}
 function cityMatch(item){const lat=Number(item.latitude),lon=Number(item.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;return ORIGINAL_CITY_KEYS.find(k=>{const loc=FORECAST_LOCATIONS[k],name=String(item.name||'').toLowerCase();const aliases={tokyo:['tokyo','東京','东京'],sapporo:['sapporo','札幌'],taipei:['taipei','台北','臺北'],seoul:['seoul','首爾','首尔','서울'],'new-york':['new york','紐約','纽约'],paris:['paris','巴黎'],singapore:['singapore','新加坡']};return loc&&Math.abs(loc[0]-lat)<.14&&Math.abs(loc[1]-lon)<.14&&aliases[k].includes(name)})||null}
-function addCity(item){const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);closeManager()}
+function addCity(item){citySearch.blur();const original=cityMatch(item),key=original||'geo-'+item.id;if(!CITIES[key]){CITIES[key]={name:item.name,zone:item.timezone||'UTC',lat:Number(item.latitude),lon:Number(item.longitude),country:item.country||'',isCustom:true};FORECAST_LOCATIONS[key]=[Number(item.latitude),Number(item.longitude)]}if(!myCityOrder.includes(key))myCityOrder.push(key);saveMyCities();rebuildCityMenu();renderManagedCities();switchCity(key);closeManager()}
 function renderSearchResults(results){cityResults.replaceChildren();if(!results.length){cityResults.textContent='找不到符合的城市，請嘗試英文或當地名稱。';return}for(const item of results){if(!Number.isFinite(Number(item.latitude))||!Number.isFinite(Number(item.longitude))||!item.id)continue;const key=cityMatch(item)||'geo-'+item.id,row=document.createElement('div');row.className='city-result';const label=document.createElement('span');label.className='city-result-name';label.textContent=item.name;const sub=document.createElement('small');sub.textContent=[item.admin1,item.country].filter(Boolean).join(' · ');label.append(sub);const button=document.createElement('button');button.textContent=myCityOrder.includes(key)?'已加入':'＋ 加入';button.disabled=myCityOrder.includes(key);button.onclick=()=>addCity(item);row.append(label,button);cityResults.append(row)}}
 // Traditional-Chinese city names are not consistently indexed by Open-Meteo.
 // Resolve common translated names to their native/English names, and merge
