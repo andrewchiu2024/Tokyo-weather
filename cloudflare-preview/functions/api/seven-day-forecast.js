@@ -39,6 +39,39 @@ async function jma(c,signal){
  });
  return days;
 }
+// JMA forecast offices, keyed by prefecture name from geocoding (not AMeDAS station IDs).
+// Hokkaido has several forecast offices; 016000 is the Sapporo-region default.
+const JAPAN_OFFICES={
+ 'Hokkaido':'016000','Aomori':'020000','Iwate':'030000','Miyagi':'040000','Akita':'050000','Yamagata':'060000','Fukushima':'070000',
+ 'Ibaraki':'080000','Tochigi':'090000','Gunma':'100000','Saitama':'110000','Chiba':'120000','Tokyo':'130000','Kanagawa':'140000',
+ 'Niigata':'150000','Toyama':'160000','Ishikawa':'170000','Fukui':'180000','Yamanashi':'190000','Nagano':'200000','Gifu':'210000',
+ 'Shizuoka':'220000','Aichi':'230000','Mie':'240000','Shiga':'250000','Kyoto':'260000','Osaka':'270000','Hyogo':'280000',
+ 'Nara':'290000','Wakayama':'300000','Tottori':'310000','Shimane':'320000','Okayama':'330000','Hiroshima':'340000',
+ 'Yamaguchi':'350000','Tokushima':'360000','Kagawa':'370000','Ehime':'380000','Kochi':'390000','Fukuoka':'400000',
+ 'Saga':'410000','Nagasaki':'420000','Kumamoto':'430000','Oita':'440000','Miyazaki':'450000','Kagoshima':'460100','Okinawa':'471000'
+};
+const JAPAN_ALIASES={'北海道':'Hokkaido','青森県':'Aomori','岩手県':'Iwate','宮城県':'Miyagi','秋田県':'Akita','山形県':'Yamagata','福島県':'Fukushima','茨城県':'Ibaraki','栃木県':'Tochigi','群馬県':'Gunma','埼玉県':'Saitama','千葉県':'Chiba','東京都':'Tokyo','神奈川県':'Kanagawa','新潟県':'Niigata','富山県':'Toyama','石川県':'Ishikawa','福井県':'Fukui','山梨県':'Yamanashi','長野県':'Nagano','岐阜県':'Gifu','静岡県':'Shizuoka','愛知県':'Aichi','三重県':'Mie','滋賀県':'Shiga','京都府':'Kyoto','大阪府':'Osaka','兵庫県':'Hyogo','奈良県':'Nara','和歌山県':'Wakayama','鳥取県':'Tottori','島根県':'Shimane','岡山県':'Okayama','広島県':'Hiroshima','山口県':'Yamaguchi','徳島県':'Tokushima','香川県':'Kagawa','愛媛県':'Ehime','高知県':'Kochi','福岡県':'Fukuoka','佐賀県':'Saga','長崎県':'Nagasaki','熊本県':'Kumamoto','大分県':'Oita','宮崎県':'Miyazaki','鹿児島県':'Kagoshima','沖縄県':'Okinawa'};
+function officeFor(admin1){const name=String(admin1||'').trim();return JAPAN_OFFICES[name]||JAPAN_OFFICES[JAPAN_ALIASES[name]]||null}
+function distanceKm(a,b,c,d){const r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,q=Math.sin(x/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)**2;return 12742*Math.asin(Math.sqrt(q))}
+async function resolveJapaneseOffice(params,signal){
+ const direct=officeFor(params.get('admin1'));
+ if(direct){
+  // Hokkaido is divided among multiple JMA offices: never apply Sapporo to distant cities.
+  if(direct==='016000'&&distanceKm(Number(params.get('lat')),Number(params.get('lon')),43.0618,141.3545)>80)return null;
+  return direct;
+ }
+ // For cities saved before v2.3, recover the prefecture via a nearby geocoding result.
+ const lat=Number(params.get('lat')),lon=Number(params.get('lon')),name=params.get('name');
+ if(!name||!Number.isFinite(lat)||!Number.isFinite(lon))return null;
+ const url=new URL('https://geocoding-api.open-meteo.com/v1/search');
+ url.search=new URLSearchParams({name,count:'20',language:'en',format:'json'}).toString();
+ const data=await getJson(url,signal);
+ const candidates=(data.results||[]).filter(x=>x.country_code==='JP'&&officeFor(x.admin1)&&Number.isFinite(x.latitude)&&Number.isFinite(x.longitude));
+ candidates.sort((a,b)=>distanceKm(lat,lon,a.latitude,a.longitude)-distanceKm(lat,lon,b.latitude,b.longitude));
+ const best=candidates[0];
+ const found=best&&distanceKm(lat,lon,best.latitude,best.longitude)<45?officeFor(best.admin1):null;
+ return found==='016000'&&distanceKm(lat,lon,43.0618,141.3545)>80?null:found;
+}
 function extractCwaValue(v){
  if(Array.isArray(v)){for(const item of v){const n=validNumber(item?.value??item?.Value);if(n!==null)return n;}return null;}
  return validNumber(v?.value??v?.Value??v);
@@ -84,11 +117,19 @@ async function cwa(signal,env){
  return result;
 }
 export async function onRequest({request,env}){
- const city=new URL(request.url).searchParams.get('city');
- if(!Object.prototype.hasOwnProperty.call(CITIES,city))return new Response(JSON.stringify({error:'不支援的城市'}),{status:400,headers});
+ const params=new URL(request.url).searchParams,city=params.get('city');
+ const custom=city==='custom';
+ if(!custom&&!Object.prototype.hasOwnProperty.call(CITIES,city))return new Response(JSON.stringify({error:'不支援的城市'}),{status:400,headers});
+ const lat=Number(params.get('lat')),lon=Number(params.get('lon'));
+ if(custom&&(!params.has('lat')||!params.has('lon')||!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180))return new Response(JSON.stringify({error:'城市座標無效'}),{status:400,headers});
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
  try{
-  const config=CITIES[city];
+  const config=custom?{lat,lon,zone:params.get('zone')||'Asia/Tokyo'}:CITIES[city];
+  const isJapan=custom&&params.get('country')==='JP';
+  // Do not claim a prefecture or official forecast unless it was actually matched.
+  let office=null;
+  if(isJapan){try{office=await resolveJapaneseOffice(params,controller.signal)}catch(e){/* model fallback */}}
+  if(office)config.jma=office;
   // Retrieve the model separately so a failed official feed does not hide all seven days.
   const [baseResult,officialResult]=await Promise.allSettled([model(config,controller.signal),config.jma?jma(config,controller.signal):config.cwa?cwa(controller.signal,env):Promise.resolve(null)]);
   if(baseResult.status==='rejected')throw baseResult.reason;
@@ -110,7 +151,7 @@ export async function onRequest({request,env}){
    }
   }
   const officialUsed=days.some(d=>d.tempSource===officialName||d.humiditySource===officialName);
-  const data={city,days,officialStatus:!officialName?'not_applicable':officialUsed?'ok':'unavailable',officialAgency:officialName,notes:officialName&&!officialUsed?'官方預報目前無法取得，暫以 Open-Meteo 補足。':null};
+  const data={city,days,officialStatus:isJapan&&!office?'unavailable':!officialName?'not_applicable':officialUsed?'ok':'unavailable',officialAgency:officialName,forecastOffice:office,notes:isJapan&&!office?'無法可靠匹配 JMA 預報區域，暫以 Open-Meteo 補足。':officialName&&!officialUsed?'官方預報目前無法取得，暫以 Open-Meteo 補足。':null};
   return new Response(JSON.stringify(data),{status:200,headers});
  }catch(e){return new Response(JSON.stringify({error:'七天預報暫時無法取得：'+e.message}),{status:502,headers:{...headers,'Cache-Control':'no-store'}})}
  finally{clearTimeout(timer)}
