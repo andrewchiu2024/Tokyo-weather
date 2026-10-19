@@ -369,7 +369,7 @@ function renderForecast(data,stale=false){
   const absoluteStops=[[-10,'#7488dc'],[0,'#6fa9e7'],[10,'#83c7cb'],[15,'#9ed5a1'],[20,'#e0d568'],[25,'#f4bd43'],[30,'#f49a30'],[35,'#ed6540'],[40,'#df4c43']];
   const defs=svgEl('defs');
   const gradient=svgEl('linearGradient',{id:'temperature-range-gradient',gradientUnits:'userSpaceOnUse',x1:0,y1:yAt(40),x2:0,y2:yAt(-10)});
-  for(const [temp,color] of absoluteStops){
+  for(const [temp,color] of [...absoluteStops].reverse()){
    const offset=((40-temp)/50*100).toFixed(2)+'%';
    gradient.append(svgEl('stop',{offset,'stop-color':color}));
   }
