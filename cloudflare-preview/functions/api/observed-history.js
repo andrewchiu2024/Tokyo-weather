@@ -30,32 +30,18 @@ async function taipeiHistory(env){
  if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
  const end=Date.now(),start=end-24*3600000;
  const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
- // Query a wider window with explicit Taiwan offset. If CWA ignores/rejects
- // the filter, retry unfiltered to distinguish API filtering from no archive.
- const taipeiIso=t=>new Date(t+8*3600000).toISOString().slice(0,19)+'+08:00';
- const windows=[
-  {Authorization:key,format:'JSON',limit:'72',timeFrom:taipeiIso(start-48*3600000),timeTo:taipeiIso(end)},
-  {Authorization:key,format:'JSON',limit:'72'}
- ];
- let entries=[],lastCount=0;
- for(const params of windows){
-  url.search=new URLSearchParams(params).toString();
-  const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
-  if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
-  const metadata=await metaRes.json();
-  if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
-  const all=metadataEntries(metadata);
-  lastCount=all.length;
-  entries=all.filter(x=>Number.isFinite(cwaTime(x.DateTime))&&cwaTime(x.DateTime)>=start-48*3600000&&cwaTime(x.DateTime)<=end);
-  if(entries.length)break;
- }
- if(!entries.length)throw Error(`CWA 近 72 小時未找到可用歷史檔案（最後清單 ${lastCount} 筆）；可能是官方資料延遲或查詢篩選方式不符`);
- entries.sort((a,b)=>cwaTime(a.DateTime)-cwaTime(b.DateTime));
- const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-28);
+ // CWA history metadata is an ascending hourly archive; request the relevant local time window.
+ const localTime=t=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(t)).replace(' ','T');
+ url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'48',timeFrom:localTime(start-2*3600000),timeTo:localTime(end)}).toString();
+ const metaRes=await fetch(url,{headers:{Accept:'application/json'}});
+ if(!metaRes.ok)throw Error('CWA 歷史檔案清單 HTTP '+metaRes.status);
+ const metadata=await metaRes.json();
+ if(metadata?.dataset?.success==='false')throw Error('CWA 歷史檔案清單拒絕請求');
+ const entries=metadataEntries(metadata);
+ if(!entries.length)throw Error('CWA 指定時間範圍內沒有歷史檔案');
+ const unique=[...new Set(entries.map(downloadUrl).filter(Boolean))].slice(-30);
  if(!unique.length)throw Error('CWA 歷史檔案沒有 ProductURL');
- const settled=[];
- for(let i=0;i<unique.length;i+=6){
- const batch=await Promise.allSettled(unique.slice(i,i+6).map(async fileUrl=>{
+ const settled=await Promise.allSettled(unique.map(async fileUrl=>{
   const u=new URL(fileUrl);
   if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))throw Error('非預期的 CWA 官方下載網址');
   // Metadata ProductURL can include authorization; replace with the current secret.
@@ -64,8 +50,6 @@ async function taipeiHistory(env){
   if(!r.ok)throw Error('CWA 歷史檔案 HTTP '+r.status);
   return r.json();
  }));
- settled.push(...batch);
- }
  const byTime=new Map();
  for(const item of settled){
   if(item.status!=='fulfilled')continue;
@@ -81,8 +65,40 @@ async function taipeiHistory(env){
  if(points.length<12)throw Error(`CWA 臺北測站近 24 小時有效逐時觀測不足（${points.length} 筆；歷史檔案 ${entries.length} 筆；下載成功 ${settled.filter(x=>x.status==='fulfilled').length} 筆）`);
  return {city:'taipei',station:'466920',source:'CWA official hourly station observations',resolutionMinutes:60,points,observedThrough:points.at(-1).time};
 }
+// Temporary CWA sample diagnostic. Does not expose Authorization or ProductURL.
+function safeShape(value, depth=0){
+ if(depth>5)return '[depth limit]';
+ if(Array.isArray(value))return {type:'array',length:value.length,first:value.length?safeShape(value[0],depth+1):null};
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,15).filter(([k])=>!/(authorization|producturl|token|secret|key|url)/i.test(k)).map(([k,v])=>[k,safeShape(v,depth+1)]));
+ if(typeof value==='string')return value.length>70?value.slice(0,70)+'…':value;
+ return value;
+}
+async function taipeiSampleDiagnostic(env){
+ const key=env?.CWA_API_KEY;
+ if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
+ const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
+ url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'3',offset:'0',timeFrom:'2026-10-18T12:00:00',timeTo:'2026-10-19T12:00:00'}).toString();
+ const r=await fetch(url,{headers:{Accept:'application/json'}});
+ if(!r.ok)return {stage:'metadata',httpStatus:r.status};
+ const meta=await r.json(), entries=metadataEntries(meta);
+ const out={stage:'metadata',httpStatus:r.status,success:meta?.dataset?.success??null,entryCount:entries.length,firstEntryTime:entries[0]?.DateTime??null};
+ const fileUrl=entries.map(downloadUrl).find(Boolean);
+ if(!fileUrl)return out;
+ const u=new URL(fileUrl);
+ if(u.protocol!=='https:'||u.hostname!=='opendata.cwa.gov.tw'||!u.pathname.startsWith('/historyapi/v1/getData/O-A0001-001/'))return {...out,fileStatus:'unexpected CWA URL'};
+ u.searchParams.set('Authorization',key);
+ const f=await fetch(u.toString(),{headers:{Accept:'application/json'}});
+ out.fileHttpStatus=f.status;
+ if(!f.ok)return out;
+ try{out.fileShape=safeShape(await f.json());}catch{out.fileStatus='not JSON';}
+ return out;
+}
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
+ if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='sample'){
+  try{return new Response(JSON.stringify(await taipeiSampleDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
+  catch(e){return new Response(JSON.stringify({error:'CWA sample diagnostic failed',detail:String(e.message).replace(/Authorization=[^&\s]+/gi,'Authorization=[redacted]')}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
+ }
  if(city==='taipei'){
   try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
