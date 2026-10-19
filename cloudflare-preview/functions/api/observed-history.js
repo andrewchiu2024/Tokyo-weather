@@ -66,7 +66,9 @@ async function taipeiHistory(env){
  return {city:'taipei',station:'466920',source:'CWA official hourly station observations',resolutionMinutes:60,points,observedThrough:points.at(-1).time};
 }
 export async function onRequest({request,env}){
- const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
+ const params=new URL(request.url).searchParams,city=params.get('city');
+ const customStation=params.get('station');
+ const station=customStation&&/^\d{5}$/.test(customStation)&&/^geo-\d+$/.test(city||'')?customStation:STATIONS[city];
  if(city==='taipei'){
   try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
