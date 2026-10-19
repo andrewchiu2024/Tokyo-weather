@@ -137,30 +137,44 @@ async function directCwaDiagnostic(env){
     if(loc2){try{out.nextRedirectHost=new URL(loc2,u).hostname;}catch{}}
    }else if(!r.ok){out.outcome='http-error';}
    else{
-    const body=await r.text();
-    out.bodyBytes=body.length;
-    try{
-     const json=JSON.parse(body);
-     out.outcome='json';
-     out.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
-     const stations=cwaStations(json);
-     out.taipeiStationCount=stations.length;
-     out.firstTaipeiSample=stations.length?{
-      stationId:String(stations[0].StationId??stations[0].StationID??''),
-      observedAt:stations[0].ObsTime?.DateTime??stations[0].DateTime??null,
-      airTemperature:stations[0].WeatherElement?.AirTemperature??stations[0].AirTemperature??null
-     }:null;
-    }catch{out.outcome='not-json';}
+    const bytes=new Uint8Array(await r.arrayBuffer());
+    out.bodyBytes=bytes.byteLength;
+    out.first16Hex=Array.from(bytes.slice(0,16),b=>b.toString(16).padStart(2,'0')).join(' ');
+    out.magic=bytes[0]===0x50&&bytes[1]===0x4b?'zip':bytes[0]===0x1f&&bytes[1]===0x8b?'gzip':bytes[0]===0x7b||bytes[0]===0x5b?'possibly-json':'other';
+    out.contentEncoding=r.headers.get('content-encoding')||null;
+    out.contentDispositionPresent=Boolean(r.headers.get('content-disposition'));
+    let decoded=null;
+    if(out.magic==='gzip'&&typeof DecompressionStream==='function'){
+     try{const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));decoded=await new Response(stream).text();out.gzipDecoded=true;}
+     catch{out.gzipDecoded=false;}
+    }else if(out.magic!=='zip'){
+     decoded=new TextDecoder('utf-8',{fatal:false}).decode(bytes);
+    }
+    if(decoded!==null){
+     out.textPrefix=decoded.slice(0,100).replace(/[\x00-\x1f]/g,' ');
+     try{
+      const json=JSON.parse(decoded);
+      out.outcome='json';
+      out.topKeys=json&&typeof json==='object'?Object.keys(json).slice(0,10):[];
+      const stations=cwaStations(json);
+      out.taipeiStationCount=stations.length;
+      out.firstTaipeiSample=stations.length?{
+       stationId:String(stations[0].StationId??stations[0].StationID??''),
+       observedAt:stations[0].ObsTime?.DateTime??stations[0].DateTime??null,
+       airTemperature:stations[0].WeatherElement?.AirTemperature??stations[0].AirTemperature??null
+      }:null;
+     }catch{out.outcome='binary-or-non-json';}
+    }else out.outcome='compressed-archive';
    }
   }catch(e){out.outcome='fetch-failed';out.errorType=e?.name||'Error';}
   results.push(out);
  }
- return {diagnostic:'cwa-direct-redirect',results};
+ return {diagnostic:'cwa-direct-format',results};
 }
 
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
- if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='redirect'){
+ if(city==='taipei'&&new URL(request.url).searchParams.get('diagnostic')==='format'){
   try{return new Response(JSON.stringify(await directCwaDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
   catch{return new Response(JSON.stringify({error:'CWA direct diagnostic failed'}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
