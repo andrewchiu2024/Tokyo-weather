@@ -29,6 +29,27 @@ function cwaStations(data){
  }
  walk(data);return result;
 }
+// Safe metadata diagnostics: structural keys only, never authorization tokens or download URLs.
+function metadataShape(value, depth=0){
+ if(depth>3)return '[depth limit]';
+ if(Array.isArray(value))return {type:'array',length:value.length,first:value.length?metadataShape(value[0],depth+1):null};
+ if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).slice(0,16).map(([k,v])=>[k,metadataShape(v,depth+1)]));
+ return typeof value;
+}
+async function taipeiMetadataDiagnostic(env){
+ const key=env?.CWA_API_KEY;
+ if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
+ const url=new URL('https://opendata.cwa.gov.tw/historyapi/v1/getMetadata/O-A0001-001');
+ url.search=new URLSearchParams({Authorization:key,format:'JSON',limit:'5'}).toString();
+ const response=await fetch(url,{headers:{Accept:'application/json'}});
+ const contentType=response.headers.get('content-type')||'';
+ const raw=await response.text();
+ let payload;
+ try{payload=JSON.parse(raw);}catch{payload=null;}
+ return {httpStatus:response.status,contentType:contentType.split(';')[0],json:payload!==null,
+  shape:payload===null?null:metadataShape(payload),
+  note:'僅顯示資料結構與欄位類型，不回傳金鑰、網址或原始資料'};
+}
 async function taipeiHistory(env){
  const key=env?.CWA_API_KEY;
  if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
@@ -67,6 +88,10 @@ async function taipeiHistory(env){
 export async function onRequest({request,env}){
  const city=new URL(request.url).searchParams.get('city'),station=STATIONS[city];
  if(city==='taipei'){
+  if(new URL(request.url).searchParams.get('diagnostic')==='1'){
+   try{return new Response(JSON.stringify(await taipeiMetadataDiagnostic(env)),{headers:{...HEADERS,'Cache-Control':'no-store'}});}
+   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
+  }
   try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
