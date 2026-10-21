@@ -98,6 +98,6 @@ export async function onRequest({request,env}){
   }
   const points=[...byTime.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
   if(points.length<12)throw Error('可用測站歷史觀測不足');
-  return new Response(JSON.stringify({city,station,source:'JMA AMeDAS',resolutionMinutes:10,points,observedThrough:latestText}),{headers:HEADERS});
+  return new Response(JSON.stringify({city,station,source:'JMA AMeDAS',resolutionMinutes:10,points,observedThrough:latestText,humidityObservationCount:points.filter(p=>p.humidity!==null).length}),{headers:HEADERS});
  }catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}})}
 }
