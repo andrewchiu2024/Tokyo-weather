@@ -383,7 +383,19 @@ function renderHistory(data){
    if(!Number.isFinite(ms)||!Number.isFinite(p.temp))continue;
    const hour=Math.floor(ms/3600000),distance=ms-hour*3600000;
    const previous=hours.get(hour);
-   if(!previous||distance<previous.distance)hours.set(hour,{point:p,distance});
+   // Keep the temperature observation closest to the hour, but retain a genuine
+   // humidity reading from the same hour when its sampling time differs.
+   const humidityValid=p.humidity!==null&&p.humidity!==undefined&&p.humidity!==''&&Number.isFinite(Number(p.humidity))&&Number(p.humidity)>=0&&Number(p.humidity)<=100;
+   if(!previous){hours.set(hour,{point:{...p},distance,humidityDistance:humidityValid?distance:Infinity});continue;}
+   if(distance<previous.distance){
+    const keepHumidity=previous.humidityDistance<Infinity&&!humidityValid;
+    const point={...p};
+    if(keepHumidity)point.humidity=previous.point.humidity;
+    hours.set(hour,{point,distance,humidityDistance:humidityValid?distance:previous.humidityDistance});
+   }else if(humidityValid&&distance<previous.humidityDistance){
+    previous.point.humidity=p.humidity;
+    previous.humidityDistance=distance;
+   }
   }
   return [...hours.entries()].sort((a,b)=>a[0]-b[0]).slice(-24).map(([,v])=>v.point);
  })():rawPoints;
