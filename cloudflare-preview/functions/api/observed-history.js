@@ -19,10 +19,12 @@ function taipeiFromXml(xml){
  for(const station of stations){
   if(xmlText(xmlTag(station,'StationId'))!=='466920')continue;
   const timeText=xmlText(xmlTag(xmlTag(station,'ObsTime')||station,'DateTime'));
-  const temperature=xmlText(xmlTag(xmlTag(station,'WeatherElement')||station,'AirTemperature'));
+  const weather=xmlTag(station,'WeatherElement')||station;
+  const temperature=xmlText(xmlTag(weather,'AirTemperature'));
+  const humidityText=xmlText(xmlTag(weather,'RelativeHumidity'));
   const temp=Number(temperature),time=cwaTime(timeText);
   if(Number.isFinite(time)&&temperature!==''&&Number.isFinite(temp)&&temp>=-50&&temp<=60)
-   return {time:new Date(time).toISOString(),temp};
+   return {time:new Date(time).toISOString(),temp,humidity:humidityText!==''&&Number.isFinite(Number(humidityText))&&Number(humidityText)>=0&&Number(humidityText)<=100?Number(humidityText):null};
  }
  return null;
 }
@@ -91,7 +93,7 @@ export async function onRequest({request,env}){
     if(!/^\d{12}(?:\d{2})?$/.test(key))continue;
     const v=val?.temp?.[0];if(typeof v!=='number'||!Number.isFinite(v)||v< -60||v>60)continue;
     const t=Date.UTC(+key.slice(0,4),+key.slice(4,6)-1,+key.slice(6,8),+key.slice(8,10)-9,+key.slice(10,12));
-    if(t>=start.getTime()&&t<=end.getTime())byTime.set(t,{time:new Date(t).toISOString(),temp:v});
+    if(t>=start.getTime()&&t<=end.getTime())byTime.set(t,{time:new Date(t).toISOString(),temp:v,humidity:typeof val?.humidity?.[0]==='number'&&val.humidity[0]>=0&&val.humidity[0]<=100?val.humidity[0]:null});
    }
   }
   const points=[...byTime.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
