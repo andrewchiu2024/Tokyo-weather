@@ -45,12 +45,12 @@ async function fetchCwaXml(key,epoch){
  if(!/^\s*<\?xml\b|^\s*<cwaopendata\b/i.test(xml))throw Error('CWA archive not XML');
  return taipeiFromXml(xml);
 }
-async function taipeiHistory(env){
+async function taipeiHistory(env,hoursBack=24){
  const key=env?.CWA_API_KEY;if(!key)throw Error('Preview 環境缺少 CWA_API_KEY');
- const end=Date.now(),start=end-24*3600000;
+ const end=Date.now(),start=end-hoursBack*3600000;
  // Archive paths use Taipei local hours. Include extra earlier hours for archive publishing delays.
  const lastHour=Math.floor(end/3600000)*3600000;
- const hours=Array.from({length:29},(_,i)=>lastHour-i*3600000);
+ const hours=Array.from({length:hoursBack+5},(_,i)=>lastHour-i*3600000);
  const byTime=new Map();let succeeded=0,failed=0;
  // Bounded concurrency avoids a 29-request burst against the CWA service.
  for(let i=0;i<hours.length;i+=6){
@@ -64,15 +64,16 @@ async function taipeiHistory(env){
   }
  }
  const points=[...byTime.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
- if(points.length<8)throw Error(`CWA 臺北站近 24 小時有效逐時觀測不足（${points.length} 筆；檔案讀取成功 ${succeeded} 筆，失敗 ${failed} 筆）`);
+ if(points.length<8)throw Error(`CWA 臺北站歷史有效逐時觀測不足（${points.length} 筆；檔案讀取成功 ${succeeded} 筆，失敗 ${failed} 筆）`);
  return {city:'taipei',station:'466920',source:'CWA official hourly station observations',resolutionMinutes:60,points,observedThrough:points.at(-1).time};
 }
 export async function onRequest({request,env}){
  const params=new URL(request.url).searchParams,city=params.get('city');
+ const hoursBack=params.get('hours')==='48'?48:24;
  const customStation=params.get('station');
  const station=customStation&&/^\d{5}$/.test(customStation)&&/^geo-\d+$/.test(city||'')?customStation:STATIONS[city];
  if(city==='taipei'){
-  try{return new Response(JSON.stringify(await taipeiHistory(env)),{headers:HEADERS});}
+  try{return new Response(JSON.stringify(await taipeiHistory(env,hoursBack)),{headers:HEADERS});}
   catch(e){return new Response(JSON.stringify({error:e.message}),{status:502,headers:{...HEADERS,'Cache-Control':'no-store'}});}
  }
  if(!station)return new Response(JSON.stringify({error:'此城市尚未接入官方歷史測站資料'}),{status:400,headers:HEADERS});
@@ -81,7 +82,7 @@ export async function onRequest({request,env}){
   if(!latestResponse.ok)throw Error('JMA 時間資訊無法取得');
   const latestText=(await latestResponse.text()).trim(),end=new Date(latestText);
   if(!Number.isFinite(end.getTime()))throw Error('JMA 時間格式異常');
-  const start=new Date(end.getTime()-24*3600000),chunks=new Set();
+  const start=new Date(end.getTime()-hoursBack*3600000),chunks=new Set();
   for(let t=start.getTime()-3*3600000;t<=end.getTime();t+=3600000)chunks.add(stampJst(new Date(t)));
   const results=await Promise.allSettled([...chunks].map(async chunk=>{
    const r=await fetch(`https://www.jma.go.jp/bosai/amedas/data/point/${station}/${chunk}.json`);
