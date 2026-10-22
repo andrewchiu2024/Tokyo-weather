@@ -5,4 +5,3 @@ Tokyo Meteo v2.2 測試版（第一階段）
 注意：新增日本城市的七天與逐時預報仍使用 Open-Meteo，尚未接入 JMA 地區預報。
 未在 Cloudflare 線上實測，請先部署測試分支。
 JMA 網站 JSON 非保證穩定的公開 API。
-Trigger preview deployment

@@ -164,12 +164,12 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 
 /* AirFlow city illustrations: decorative, light-weight, never cover weather data. */
 main{position:relative;isolation:isolate}
-main::before{content:"";position:absolute;z-index:-1;pointer-events:none;top:0;left:50%;transform:translateX(-50%);width:100%;height:540px;background-image:linear-gradient(to bottom,rgba(16,28,43,.22) 0%,rgba(16,28,43,.2) 32%,#182d40 100%),var(--city-art,none);background-position:center top;background-size:cover;background-repeat:no-repeat;opacity:.78}
-main[data-city-art="custom"]::before{opacity:.78}
+main::before{content:"";position:absolute;z-index:-1;pointer-events:none;top:0;left:0;width:100%;height:580px;background-image:linear-gradient(to bottom,rgba(16,28,43,.04) 0%,rgba(16,28,43,.08) 42%,#182d40 100%),var(--city-art,none);background-position:center top,center top;background-size:100% 100%,cover;background-repeat:no-repeat;opacity:1}
+main[data-city-art="custom"]::before{opacity:1}
 main[data-art-time="day"]::before{filter:brightness(1.12) saturate(.95)}
-main[data-art-time="dusk"]::before{filter:sepia(.12) hue-rotate(315deg) brightness(.9)}
-main[data-art-time="night"]::before{filter:brightness(.64) saturate(.85)}
-main .hero{background:rgba(32,58,80,.82);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+main[data-art-time="dusk"]::before{filter:sepia(.08) hue-rotate(340deg) brightness(1)}
+main[data-art-time="night"]::before{filter:brightness(.9) saturate(1.08)}
+main .hero{background:rgba(32,58,80,.76);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
 @media(prefers-reduced-motion:no-preference){main::before{transition:opacity .2s ease}}
 </style>
 </head>
