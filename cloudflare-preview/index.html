@@ -42,7 +42,7 @@ h1{font-size:28px;margin:7px 0 5px;letter-spacing:-.5px}
 .observed{font-size:12px;color:#b2c8d9;line-height:1.6}
 .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
 .metric{background:#203a50;border:1px solid #3e5b70;border-radius:18px;padding:17px;min-width:0}
-.metric-label{font-size:13px;color:#c1d5e1}
+.dew-action{width:100%;text-align:left;display:block;cursor:pointer;font:inherit}.dew-action:focus-visible{outline:2px solid #8bdce8;outline-offset:3px}.dew-action .metric-note{color:#9bdbe9}.dew-dialog{border:1px solid #50728b;background:#162f43;color:#fff;border-radius:20px;width:min(94vw,540px);max-height:88vh;overflow:auto;padding:20px}.dew-dialog::backdrop{background:rgba(4,15,27,.76)}.dew-chart{width:100%;height:auto;touch-action:pan-y}.dew-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.dew-status{font-size:12px;color:#bdd2e1;line-height:1.6;margin:10px 0}.metric-label{font-size:13px;color:#c1d5e1}
 .metric-value{font-size:32px;letter-spacing:-1px;font-weight:720;margin:8px 0}
 .metric-note{font-size:11px;color:#9dbbcd;line-height:1.5}
 /* One compact wind card: direction and speed on the same line. */
@@ -219,11 +219,11 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
     <div class="metric-value" id="humidityValue">—</div>
     <div class="metric-note" id="humidityNote">觀測值</div>
   </div>
-  <div class="metric">
-    <div class="metric-label">🌡️ 露點溫度</div>
+  <button class="metric dew-action" id="dewOpen" type="button" aria-haspopup="dialog" aria-controls="dewDialog">
+    <div class="metric-label">🌡️ 露點溫度 ↗</div>
     <div class="metric-value" id="dew">—</div>
-    <div class="metric-note">Magnus 公式推算</div>
-  </div>
+    <div class="metric-note">Magnus 公式推算 · 點擊查看 48 小時趨勢</div>
+  </button>
   <div class="metric wind-metric">
     <div class="metric-label">💨 風向・風速</div>
     <div class="metric-value" id="windCombinedValue" aria-live="polite">—</div>
@@ -231,6 +231,12 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
   </div>
 </div>
 
+<dialog class="dew-dialog" id="dewDialog" aria-labelledby="dewTitle">
+  <div class="dew-dialog-head"><h2 id="dewTitle" style="margin:0;font-size:19px">過去 48 小時露點溫度</h2><button id="dewClose" type="button" aria-label="關閉露點趨勢">✕</button></div>
+  <p class="dew-status" id="dewSource">正在取得資料…</p>
+  <div id="dewChart"></div><p class="dew-status" id="dewDetail"></p>
+  <p class="dew-status" id="dewStatus"></p>
+</dialog>
 <div class="card">
   <div class="section-title">空氣濕潤程度</div>
   <div class="category" id="category">等待資料</div>
@@ -441,6 +447,43 @@ function renderHistory(data){
  root.append(svg);select(points.length-1);
  $('historyStatus').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站':'JMA AMeDAS')+' '+data.station+' · '+points.length+' 筆實測 · '+(hasHumidity?'氣溫／濕度':'濕度資料不可用')+' · 缺測不補值';
 }
+// Independent 48-hour dew point view; the 24-hour observation chart is unchanged.
+const dewHistoryCache=new Map();let dewHistoryRequest=0;
+function dewValid(p){return Number.isFinite(p.temp)&&p.humidity!==null&&p.humidity!==undefined&&p.humidity!==''&&Number.isFinite(Number(p.humidity))&&Number(p.humidity)>0&&Number(p.humidity)<=100;}
+function dewRender(data,forCity){
+ const root=$('dewChart');root.replaceChildren();
+ const all=(data.points||[]).filter(p=>Number.isFinite(Date.parse(p.time))).sort((a,b)=>Date.parse(a.time)-Date.parse(b.time));
+ const end=Date.now(),points=all.filter(p=>Date.parse(p.time)>=end-48*3600000&&Date.parse(p.time)<=end+600000);
+ const valid=points.filter(dewValid).map(p=>({...p,dew:calculate(p.temp,Number(p.humidity))})).filter(p=>Number.isFinite(p.dew));
+ $('dewSource').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站實測推算':data.source?.startsWith('JMA')?'JMA AMeDAS 實測推算':'Open-Meteo 模型估算')+' · '+(data.station||CITIES[forCity].name)+' · Magnus 公式';
+ if(valid.length<2){$('dewStatus').textContent='有效氣溫及濕度資料不足，無法繪製露點曲線。';$('dewDetail').textContent='';return;}
+ const ns='http://www.w3.org/2000/svg',el=(tag,a={})=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(a))n.setAttribute(k,String(v));return n};
+ const svg=el('svg',{viewBox:'0 0 350 210',class:'dew-chart',role:'img','aria-label':'過去48小時露點溫度變化'}),L=36,R=332,T=25,B=163;
+ const low=Math.floor(Math.min(...valid.map(p=>p.dew))-2),high=Math.ceil(Math.max(...valid.map(p=>p.dew))+2),y=v=>B-(v-low)/Math.max(1,high-low)*(B-T),x=t=>L+(t-(end-48*3600000))/(48*3600000)*(R-L);
+ for(let i=0;i<=4;i++){const v=low+(high-low)*i/4,yy=y(v);svg.append(el('line',{x1:L,x2:R,y1:yy,y2:yy,stroke:'#48667b','stroke-dasharray':'3 5'}));const t=el('text',{x:L-5,y:yy+4,'text-anchor':'end',fill:'#bcd3e2','font-size':10});t.textContent=v.toFixed(0)+'°';svg.append(t);}
+ let segment=[];const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(p=>`${x(Date.parse(p.time))},${y(p.dew)}`).join(' '),fill:'none',stroke:'#8bdce8','stroke-width':2.8,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
+ for(const p of points){if(!dewValid(p)){flush();continue;}const dp=calculate(p.temp,Number(p.humidity));if(!Number.isFinite(dp)){flush();continue;}if(segment.length&&Date.parse(p.time)-Date.parse(segment.at(-1).time)>(data.resolutionMinutes===10?45:100)*60000)flush();segment.push({...p,dew:dp});}flush();
+ for(let i=0;i<=4;i++){const t=el('text',{x:L+(R-L)*i/4,y:190,'text-anchor':i===0?'start':i===4?'end':'middle',fill:'#bdd2e1','font-size':10});t.textContent=i===4?'現在':`${48-i*12}h 前`;svg.append(t);}
+ const cursor=el('line',{y1:T,y2:B,stroke:'#eaf6fa','stroke-dasharray':'4 4'}),dot=el('circle',{r:4.5,fill:'#8bdce8'});svg.append(cursor,dot);
+ const select=p=>{const xx=x(Date.parse(p.time));cursor.setAttribute('x1',xx);cursor.setAttribute('x2',xx);dot.setAttribute('cx',xx);dot.setAttribute('cy',y(p.dew));$('dewDetail').textContent=new Intl.DateTimeFormat('zh-TW',{timeZone:CITIES[forCity].zone,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(p.time))+'　露點 '+p.dew.toFixed(1)+'°C';};
+ svg.addEventListener('pointerdown',e=>{const r=svg.getBoundingClientRect(),px=(e.clientX-r.left)/r.width*350;let best=valid[0];for(const p of valid)if(Math.abs(x(Date.parse(p.time))-px)<Math.abs(x(Date.parse(best.time))-px))best=p;select(best)});
+ root.append(svg);select(valid.at(-1));$('dewStatus').textContent=`有效資料 ${valid.length} 筆 · 最低 ${Math.min(...valid.map(p=>p.dew)).toFixed(1)}°C · 最高 ${Math.max(...valid.map(p=>p.dew)).toFixed(1)}°C · 缺測不補值`;
+}
+async function dewOpen(){
+ const forCity=city,id=++dewHistoryRequest;const dialog=$('dewDialog');if(!dialog.open)dialog.showModal();$('dewTitle').textContent=CITIES[forCity].name+' · 過去 48 小時露點溫度';$('dewChart').replaceChildren();$('dewDetail').textContent='';$('dewStatus').textContent='正在取得過去 48 小時資料…';
+ try{
+  let data;const cached=dewHistoryCache.get(forCity);
+  if(cached&&Date.now()-cached.saved<600000)data=cached.data;
+  else if(isOfficialCity(forCity)){
+   const u='/api/observed-history?'+new URLSearchParams({city:forCity,hours:'48',...(CITIES[forCity].jmaStationId?{station:CITIES[forCity].jmaStationId}:{})});const r=await fetch(u);data=await r.json();if(!r.ok)throw Error(data.error||'官方歷史資料無法取得');
+  }else{
+   const c=CITIES[forCity];const u='https://api.open-meteo.com/v1/forecast?'+new URLSearchParams({latitude:c.lat,longitude:c.lon,hourly:'temperature_2m,relative_humidity_2m',past_days:'3',forecast_days:'1',timezone:'UTC'});const r=await fetch(u);if(!r.ok)throw Error('Open-Meteo 歷史模型無法取得');const j=await r.json();data={source:'Open-Meteo historical model',resolutionMinutes:60,points:(j.hourly?.time||[]).map((time,i)=>({time:time+'Z',temp:j.hourly.temperature_2m[i],humidity:j.hourly.relative_humidity_2m[i]}))};
+  }
+  if(id!==dewHistoryRequest||city!==forCity||!dialog.open)return;dewHistoryCache.set(forCity,{data,saved:Date.now()});dewRender(data,forCity);
+ }catch(e){if(id===dewHistoryRequest&&dialog.open)$('dewStatus').textContent='⚠ '+e.message;}
+}
+$('dewOpen').addEventListener('click',dewOpen);$('dewClose').addEventListener('click',()=>$('dewDialog').close());
+
 // The hourly curve is a forecast, separate from the official live observation.
 const hourlyCache=new Map();
 let hourlyController=null,hourlyRequest=0;
