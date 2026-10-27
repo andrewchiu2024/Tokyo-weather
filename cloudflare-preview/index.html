@@ -289,7 +289,7 @@ input[type=range]{width:100%;accent-color:#85c8e9;margin:20px 0 12px}
 
 <section class="hourly-panel" aria-label="過去24小時氣溫與濕度觀測" id="historyPanel">
   <div class="hourly-title">過去 24 小時氣溫與濕度變化</div>
-  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每小時實測 · °C / %</p>
+  <p class="hourly-subtitle" id="historySubtitle">日本氣象廳 AMeDAS · 每 30 分鐘實測 · °C / %</p>
   <div id="historyChart"></div><div id="historyDetail" class="hourly-detail"></div>
   <div id="historyStatus" class="hourly-status">正在讀取測站歷史資料…</div>
 </section>
@@ -368,7 +368,7 @@ async function loadHistory(force=false){
  if(!isOfficialCity(forCity)){panel.hidden=true;return;}
  panel.hidden=false;
  const isTaipei=Boolean(CITIES[forCity].isCWA);
- $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C / %':'日本氣象廳 AMeDAS · 每小時實測 · °C / %';
+ $('historySubtitle').textContent=isTaipei?'中央氣象署 CWA · 臺北站 · 每小時實測 · °C / %':'日本氣象廳 AMeDAS · 每 30 分鐘實測 · °C / %';
  const cached=historyCache.get(forCity);
  if(cached&&!force&&Date.now()-cached.saved<10*60*1000){renderHistory(cached.data);return;}
  $('historyStatus').textContent='正在取得 '+(isTaipei?'CWA 臺北站':'JMA AMeDAS')+' 過去 24 小時實測…';
@@ -383,27 +383,26 @@ function renderHistory(data){
  // Plot actual readings only. Missing humidity remains missing, never interpolated.
  const rawPoints=data.points;
  const points=(CITIES[city].isJMA||CITIES[city].jmaStationId)&&Array.isArray(rawPoints)?(()=>{
-  const hours=new Map();
+  const buckets=new Map();
+  // JMA reports observations every 10 minutes. Select the closest genuine
+  // reading to each half-hour mark; never interpolate missing values.
   for(const p of rawPoints){
    const ms=Date.parse(p.time);
    if(!Number.isFinite(ms)||!Number.isFinite(p.temp))continue;
-   const hour=Math.floor(ms/3600000),distance=ms-hour*3600000;
-   const previous=hours.get(hour);
-   // Keep the temperature observation closest to the hour, but retain a genuine
-   // humidity reading from the same hour when its sampling time differs.
+   const bucket=Math.floor(ms/1800000),distance=ms-bucket*1800000;
+   const previous=buckets.get(bucket);
    const humidityValid=p.humidity!==null&&p.humidity!==undefined&&p.humidity!==''&&Number.isFinite(Number(p.humidity))&&Number(p.humidity)>=0&&Number(p.humidity)<=100;
-   if(!previous){hours.set(hour,{point:{...p},distance,humidityDistance:humidityValid?distance:Infinity});continue;}
+   if(!previous){buckets.set(bucket,{point:{...p},distance,humidityDistance:humidityValid?distance:Infinity});continue;}
    if(distance<previous.distance){
-    const keepHumidity=previous.humidityDistance<Infinity&&!humidityValid;
     const point={...p};
-    if(keepHumidity)point.humidity=previous.point.humidity;
-    hours.set(hour,{point,distance,humidityDistance:humidityValid?distance:previous.humidityDistance});
+    if(previous.humidityDistance<Infinity&&!humidityValid)point.humidity=previous.point.humidity;
+    buckets.set(bucket,{point,distance,humidityDistance:humidityValid?distance:previous.humidityDistance});
    }else if(humidityValid&&distance<previous.humidityDistance){
     previous.point.humidity=p.humidity;
     previous.humidityDistance=distance;
    }
   }
-  return [...hours.entries()].sort((a,b)=>a[0]-b[0]).slice(-24).map(([,v])=>v.point);
+  return [...buckets.entries()].sort((a,b)=>a[0]-b[0]).slice(-48).map(([,v])=>v.point);
  })():rawPoints;
  const root=$('historyChart');root.replaceChildren();
  if(!points?.length){$('historyDetail').textContent='';$('historyStatus').textContent='沒有可用的歷史觀測';return;}
@@ -426,7 +425,7 @@ function renderHistory(data){
  const draw=(getter,y,color)=>{
   let segment=[];
   const flush=()=>{if(segment.length>1)svg.append(el('polyline',{points:segment.map(a=>a.join(',')).join(' '),fill:'none',stroke:color,'stroke-width':2.7,'stroke-linecap':'round','stroke-linejoin':'round'}));segment=[]};
-  points.forEach((p,i)=>{const v=getter(p);if(i&&ts[i]-ts[i-1]>90*60000)flush();if(v===null||!Number.isFinite(v)){flush();return;}segment.push([x(i),y(v)]);});flush();
+  points.forEach((p,i)=>{const v=getter(p);if(i&&ts[i]-ts[i-1]>45*60000)flush();if(v===null||!Number.isFinite(v)){flush();return;}segment.push([x(i),y(v)]);});flush();
  };
  draw(p=>Number.isFinite(p.temp)?p.temp:null,yTemp,'#f3b66c');
  if(hasHumidity)draw(p=>p.humidity===null||p.humidity===undefined||p.humidity===''?null:(Number.isFinite(Number(p.humidity))&&Number(p.humidity)>=0&&Number(p.humidity)<=100?Number(p.humidity):null),yHumidity,'#8bdce8');
@@ -445,7 +444,7 @@ function renderHistory(data){
  };
  svg.addEventListener('pointerdown',e=>{const r=svg.getBoundingClientRect(),pos=(e.clientX-r.left)/r.width*360;let best=0;points.forEach((p,i)=>{if(Math.abs(x(i)-pos)<Math.abs(x(best)-pos))best=i});select(best)});
  root.append(svg);select(points.length-1);
- $('historyStatus').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站':'JMA AMeDAS')+' '+data.station+' · '+points.length+' 筆實測 · '+(hasHumidity?'氣溫／濕度':'濕度資料不可用')+' · 缺測不補值';
+ $('historyStatus').textContent=(data.source?.startsWith('CWA')?'CWA 臺北站':'JMA AMeDAS')+' '+data.station+' · '+points.length+' 筆實測 · '+(hasHumidity?'氣溫／濕度':'濕度資料不可用')+' · '+(data.source?.startsWith('CWA')?'每小時':'每 30 分鐘')+'取樣 · 缺測不補值';
 }
 // Independent 48-hour dew point view; the 24-hour observation chart is unchanged.
 const dewHistoryCache=new Map();let dewHistoryRequest=0;
